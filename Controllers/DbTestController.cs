@@ -29,7 +29,17 @@ namespace SecaBackend.Controllers
         public async Task<IActionResult> ProbarConexion()
         {
             // Leo la cadena de conexión que definí en appsettings.json bajo "SecaDb".
-            string connectionString = _configuration.GetConnectionString("SecaDb");
+            var connectionString = _configuration.GetConnectionString("SecaDb");
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    return StatusCode(500, new
+    {
+        exito = false,
+        mensaje = "No se encontró la cadena de conexión 'SecaDb'. Revisa ConnectionStrings en appsettings.json o App Service > Configuration."
+    });
+}
+
 
             DateTime fechaDesdeSql;
 
