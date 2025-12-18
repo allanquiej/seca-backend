@@ -25,19 +25,27 @@ builder.Services.AddCors(options =>
     options.AddPolicy("CorsPermitido", policy =>
     {
         policy
-            // ✅ Producción (Vercel)
-            .WithOrigins(
-                "https://seca-frontend-sepia.vercel.app"
-            )
-            // ✅ Desarrollo local (Vite)
             .SetIsOriginAllowed(origin =>
-                origin == "http://localhost:5173" ||
-                origin == "http://127.0.0.1:5173"
-            )
+            {
+                // ✅ DEV local
+                if (origin == "http://localhost:5173" || origin == "http://127.0.0.1:5173")
+                    return true;
+
+                // ✅ Vercel: permite cualquier subdominio de vercel.app
+                // Ej: https://seca-frontend-sepia.vercel.app
+                // Ej: https://seca-frontend-xxxx-allan-quiejs-projects.vercel.app
+                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    return uri.Host.EndsWith(".vercel.app");
+                }
+
+                return false;
+            })
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
 });
+
 
 
 // Aquí registro el DbContext de Entity Framework Core.
