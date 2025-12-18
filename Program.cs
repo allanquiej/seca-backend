@@ -17,26 +17,28 @@ var builder = WebApplication.CreateBuilder(args);
 // por ejemplo: /api/status, /api/calculadoras, /api/chatbot, etc.
 builder.Services.AddControllers();
 
-// Aquí configuro CORS.
-// CORS evita que el navegador bloquee las peticiones desde mi frontend (Vercel)
-// hacia mi backend (Railway).
+// =========================
+// 1.5) CONFIGURACIÓN DE CORS
+// =========================
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("CorsPermitido", policyBuilder =>
+    options.AddPolicy("CorsPermitido", policy =>
     {
-        // IMPORTANTE:
-        // Más adelante, cuando tenga el dominio real del frontend en Vercel,
-        // debo colocar ese dominio aquí en lugar de "https://mi-dominio-vercel.com".
-        // Por ahora dejo localhost para trabajar en mi computadora.
-        policyBuilder
+        policy
+            // ✅ Producción (Vercel)
             .WithOrigins(
-                "https://mi-dominio-vercel.com",  // dominio real del frontend en producción
-                "http://localhost:5173"           // frontend en desarrollo con Vite
+                "https://seca-frontend-sepia.vercel.app"
+            )
+            // ✅ Desarrollo local (Vite)
+            .SetIsOriginAllowed(origin =>
+                origin == "http://localhost:5173" ||
+                origin == "http://127.0.0.1:5173"
             )
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
 });
+
 
 // Aquí registro el DbContext de Entity Framework Core.
 // Le digo que use SQL Server y que tome la cadena de conexión llamada "SecaDb"
