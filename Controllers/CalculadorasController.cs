@@ -59,7 +59,7 @@ public async Task<IActionResult> CalcularIndemnizacion([FromBody] IndemnizacionI
         MontoIndemnizacion = decimal.Round(monto, 2),
         DetalleCalculo =
             $"SalarioMensual={input.SalarioMensual}; " +
-            $"FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}; " +
+            $"FechaInicio={inicio:dd-MM-yyyy}; FechaFin={fin:dd-MM-yyyy}; " +
             $"Dias={dias}; AniosEquivalentes={decimal.Round(aniosEquivalentes, 6)}; " +
             $"Formula=SalarioMensual*AniosEquivalentes"
     };
@@ -68,7 +68,7 @@ public async Task<IActionResult> CalcularIndemnizacion([FromBody] IndemnizacionI
     var log = new CalculatorLog
     {
         TipoCalculadora = "Indemnizacion",
-        DatosEntrada = $"Salario={input.SalarioMensual}; FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}",
+        DatosEntrada = $"Salario={input.SalarioMensual}; FechaInicio={inicio:dd-MM-yyyy}; FechaFin={fin:dd-MM-yyyy}",
         Resultado = $"Monto={result.MontoIndemnizacion}; Dias={dias}; AniosEq={decimal.Round(aniosEquivalentes, 6)}",
         Fecha = DateTime.Now
     };
@@ -126,7 +126,7 @@ public async Task<IActionResult> CalcularBono14([FromBody] Bono14Input input)
         MontoBono14 = decimal.Round(monto, 2),
         DetalleCalculo =
             $"SalarioPromedio={input.SalarioPromedio}; " +
-            $"FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}; " +
+            $"FechaInicio={inicio:dd-MM-yyyy}; FechaFin={fin:dd-MM-yyyy}; " +
             $"Dias={dias}; MesesEquivalentes={decimal.Round(mesesEquivalentes, 6)}; " +
             $"Formula=(SalarioPromedio/12)*MesesEquivalentes (cap 12)"
     };
@@ -134,7 +134,7 @@ public async Task<IActionResult> CalcularBono14([FromBody] Bono14Input input)
     var log = new CalculatorLog
     {
         TipoCalculadora = "Bono14",
-        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}; FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}",
+        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}; FechaInicio={inicio:dd-MM-yyyy}; FechaFin={fin:dd-MM-yyyy}",
         Resultado = $"Monto={result.MontoBono14}; Dias={dias}; MesesEq={decimal.Round(mesesEquivalentes, 6)}",
         Fecha = DateTime.Now
     };
@@ -187,7 +187,7 @@ public async Task<IActionResult> CalcularAguinaldo([FromBody] AguinaldoInput inp
         MontoAguinaldo = decimal.Round(monto, 2),
         DetalleCalculo =
             $"SalarioPromedio={input.SalarioPromedio}; " +
-            $"FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}; " +
+            $"FechaInicio={inicio:dd-MM-yyyy}; FechaFin={fin:dd-MM-yyyy}; " +
             $"Dias={dias}; MesesEquivalentes={decimal.Round(mesesEquivalentes, 6)}; " +
             $"Formula=(SalarioPromedio/12)*MesesEquivalentes (cap 12)"
     };
@@ -195,7 +195,7 @@ public async Task<IActionResult> CalcularAguinaldo([FromBody] AguinaldoInput inp
     var log = new CalculatorLog
     {
         TipoCalculadora = "Aguinaldo",
-        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}; FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}",
+        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}; FechaInicio={inicio:dd-MM-yyyy}; FechaFin={fin:dd-MM-yyyy}",
         Resultado = $"Monto={result.MontoAguinaldo}; Dias={dias}; MesesEq={decimal.Round(mesesEquivalentes, 6)}",
         Fecha = DateTime.Now
     };
