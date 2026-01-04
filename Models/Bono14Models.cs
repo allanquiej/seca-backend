@@ -2,12 +2,14 @@ namespace SecaBackend.Models
 {
     // Datos que el usuario ingresa para calcular el Bono 14
     public class Bono14Input
-    {
-        public decimal SalarioPromedio { get; set; }
+{
+    public decimal SalarioPromedio { get; set; }
 
-        // Meses trabajados en el período (normalmente 12, pero lo dejamos flexible)
-        public decimal MesesTrabajados { get; set; }
-    }
+    // NUEVO: rango de fechas
+    public DateTime FechaInicio { get; set; }
+    public DateTime FechaFin { get; set; }
+}
+
 
     // Datos que devolvemos al frontend
     public class Bono14Result

@@ -1,10 +1,13 @@
 namespace SecaBackend.Models
 {
-    public class AguinaldoInput
-    {
-        public decimal SalarioPromedio { get; set; }
-        public decimal MesesTrabajados { get; set; }  // Máximo 12
-    }
+public class AguinaldoInput
+{
+    public decimal SalarioPromedio { get; set; }
+
+    // NUEVO: rango de fechas
+    public DateTime FechaInicio { get; set; }
+    public DateTime FechaFin { get; set; }
+}
 
     public class AguinaldoResult
     {

@@ -24,52 +24,66 @@ namespace SecaBackend.Controllers
         // CALCULADORA #1 → INDEMNIZACIÓN
         // Ruta: POST /api/calculadoras/indemnizacion
         // ===========================================================
-        [HttpPost("indemnizacion")]
-        public async Task<IActionResult> CalcularIndemnizacion([FromBody] IndemnizacionInput input)
-        {
-            // Validación básica
-            if (input.SalarioMensual <= 0 || input.AniosTrabajados <= 0)
-            {
-                return BadRequest(new
-                {
-                    exito = false,
-                    mensaje = "Los valores ingresados no son válidos."
-                });
-            }
+ [HttpPost("indemnizacion")]
+public async Task<IActionResult> CalcularIndemnizacion([FromBody] IndemnizacionInput input)
+{
+    // Validaciones básicas
+    if (input.SalarioMensual <= 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "El salario mensual debe ser mayor a 0." });
+    }
 
-            // Fórmula básica:
-            // En Guatemala la indemnización es equivalente a:
-            // 1 salario mensual * años trabajados.
-            decimal monto = input.SalarioMensual * input.AniosTrabajados;
+    var inicio = input.FechaInicio.Date;
+    var fin = input.FechaFin.Date;
 
-            // Crear resultado
-            var result = new IndemnizacionResult
-            {
-                MontoIndemnizacion = monto,
-                DetalleCalculo = 
-                    $"Indemnización = SalarioMensual ({input.SalarioMensual}) × AñosTrabajados ({input.AniosTrabajados})"
-            };
+    if (fin < inicio)
+    {
+        return BadRequest(new { exito = false, mensaje = "La fecha fin no puede ser menor que la fecha inicio." });
+    }
 
-            // Guardar log en la base de datos
-            var log = new CalculatorLog
-            {
-                TipoCalculadora = "Indemnizacion",
-                DatosEntrada = $"SalarioMensual={input.SalarioMensual}, AñosTrabajados={input.AniosTrabajados}",
-                Resultado = $"Monto={result.MontoIndemnizacion}",
-                Fecha = DateTime.Now
-            };
+    // Días trabajados (incluyendo ambos días)
+    var dias = (fin - inicio).TotalDays + 1;
+    if (dias <= 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "El rango de fechas no es válido." });
+    }
 
-            _context.CalculatorLogs.Add(log);
-            await _context.SaveChangesAsync();
+    // Años equivalentes (promedio con año bisiesto)
+    decimal aniosEquivalentes = (decimal)dias / 365.25m;
 
-            // Responder al frontend
-            return Ok(new
-            {
-                exito = true,
-                datos = result,
-                mensaje = "Cálculo de indemnización realizado con éxito."
-            });
-        }
+    // Indemnización aproximada: salario mensual * años equivalentes
+    decimal monto = input.SalarioMensual * aniosEquivalentes;
+
+    var result = new IndemnizacionResult
+    {
+        MontoIndemnizacion = decimal.Round(monto, 2),
+        DetalleCalculo =
+            $"SalarioMensual={input.SalarioMensual}; " +
+            $"FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}; " +
+            $"Dias={dias}; AniosEquivalentes={decimal.Round(aniosEquivalentes, 6)}; " +
+            $"Formula=SalarioMensual*AniosEquivalentes"
+    };
+
+    // Log a DB (sin cambiar BD)
+    var log = new CalculatorLog
+    {
+        TipoCalculadora = "Indemnizacion",
+        DatosEntrada = $"Salario={input.SalarioMensual}; FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}",
+        Resultado = $"Monto={result.MontoIndemnizacion}; Dias={dias}; AniosEq={decimal.Round(aniosEquivalentes, 6)}",
+        Fecha = DateTime.Now
+    };
+
+    _context.CalculatorLogs.Add(log);
+    await _context.SaveChangesAsync();
+
+    return Ok(new
+    {
+        exito = true,
+        datos = result,
+        mensaje = "Cálculo de indemnización realizado con éxito."
+    });
+}
+
 
 // ===========================================================
 // CALCULADORA #2 → BONO 14
@@ -78,32 +92,50 @@ namespace SecaBackend.Controllers
 [HttpPost("bono14")]
 public async Task<IActionResult> CalcularBono14([FromBody] Bono14Input input)
 {
-    if (input.SalarioPromedio <= 0 || input.MesesTrabajados <= 0)
+    if (input.SalarioPromedio <= 0)
     {
-        return BadRequest(new
-        {
-            exito = false,
-            mensaje = "Los valores ingresados no son válidos."
-        });
+        return BadRequest(new { exito = false, mensaje = "El salario promedio debe ser mayor a 0." });
     }
 
-    // Fórmula típica del Bono 14:
-    // (Salario promedio mensual / 12) × meses trabajados en el año
-    decimal monto = (input.SalarioPromedio / 12m) * input.MesesTrabajados;
+    var inicio = input.FechaInicio.Date;
+    var fin = input.FechaFin.Date;
+
+    if (fin < inicio)
+    {
+        return BadRequest(new { exito = false, mensaje = "La fecha fin no puede ser menor que la fecha inicio." });
+    }
+
+    // Días trabajados (incluye ambos)
+    var dias = (fin - inicio).TotalDays + 1;
+    if (dias <= 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "El rango de fechas no es válido." });
+    }
+
+    // Meses equivalentes aproximados
+    // (365/12 = 30.4166667)
+    decimal mesesEquivalentes = (decimal)dias / (365m / 12m);
+
+    // Bono 14 es proporcional hasta máximo 12 meses
+    if (mesesEquivalentes > 12m) mesesEquivalentes = 12m;
+
+    decimal monto = (input.SalarioPromedio / 12m) * mesesEquivalentes;
 
     var result = new Bono14Result
     {
-        MontoBono14 = monto,
-        DetalleCalculo = 
-            $"Bono14 = ({input.SalarioPromedio} / 12) × {input.MesesTrabajados}"
+        MontoBono14 = decimal.Round(monto, 2),
+        DetalleCalculo =
+            $"SalarioPromedio={input.SalarioPromedio}; " +
+            $"FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}; " +
+            $"Dias={dias}; MesesEquivalentes={decimal.Round(mesesEquivalentes, 6)}; " +
+            $"Formula=(SalarioPromedio/12)*MesesEquivalentes (cap 12)"
     };
 
-    // Guardar log en la base de datos
     var log = new CalculatorLog
     {
         TipoCalculadora = "Bono14",
-        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}, MesesTrabajados={input.MesesTrabajados}",
-        Resultado = $"Monto={result.MontoBono14}",
+        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}; FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}",
+        Resultado = $"Monto={result.MontoBono14}; Dias={dias}; MesesEq={decimal.Round(mesesEquivalentes, 6)}",
         Fecha = DateTime.Now
     };
 
@@ -118,6 +150,7 @@ public async Task<IActionResult> CalcularBono14([FromBody] Bono14Input input)
     });
 }
 
+
 // ===========================================================
 // CALCULADORA #3 → AGUINALDO
 // Ruta: POST /api/calculadoras/aguinaldo
@@ -125,32 +158,45 @@ public async Task<IActionResult> CalcularBono14([FromBody] Bono14Input input)
 [HttpPost("aguinaldo")]
 public async Task<IActionResult> CalcularAguinaldo([FromBody] AguinaldoInput input)
 {
-    if (input.SalarioPromedio <= 0 || input.MesesTrabajados <= 0)
+    if (input.SalarioPromedio <= 0)
     {
-        return BadRequest(new
-        {
-            exito = false,
-            mensaje = "Los valores ingresados no son válidos."
-        });
+        return BadRequest(new { exito = false, mensaje = "El salario promedio debe ser mayor a 0." });
     }
 
-    // Fórmula del aguinaldo:
-    // (salario mensual / 12) × meses trabajados
-    decimal monto = (input.SalarioPromedio / 12m) * input.MesesTrabajados;
+    var inicio = input.FechaInicio.Date;
+    var fin = input.FechaFin.Date;
+
+    if (fin < inicio)
+    {
+        return BadRequest(new { exito = false, mensaje = "La fecha fin no puede ser menor que la fecha inicio." });
+    }
+
+    var dias = (fin - inicio).TotalDays + 1;
+    if (dias <= 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "El rango de fechas no es válido." });
+    }
+
+    decimal mesesEquivalentes = (decimal)dias / (365m / 12m);
+    if (mesesEquivalentes > 12m) mesesEquivalentes = 12m;
+
+    decimal monto = (input.SalarioPromedio / 12m) * mesesEquivalentes;
 
     var result = new AguinaldoResult
     {
-        MontoAguinaldo = monto,
-        DetalleCalculo = 
-            $"Aguinaldo = ({input.SalarioPromedio} / 12) × {input.MesesTrabajados}"
+        MontoAguinaldo = decimal.Round(monto, 2),
+        DetalleCalculo =
+            $"SalarioPromedio={input.SalarioPromedio}; " +
+            $"FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}; " +
+            $"Dias={dias}; MesesEquivalentes={decimal.Round(mesesEquivalentes, 6)}; " +
+            $"Formula=(SalarioPromedio/12)*MesesEquivalentes (cap 12)"
     };
 
-    // Guardar log en la base de datos
     var log = new CalculatorLog
     {
         TipoCalculadora = "Aguinaldo",
-        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}, MesesTrabajados={input.MesesTrabajados}",
-        Resultado = $"Monto={result.MontoAguinaldo}",
+        DatosEntrada = $"SalarioPromedio={input.SalarioPromedio}; FechaInicio={inicio:yyyy-MM-dd}; FechaFin={fin:yyyy-MM-dd}",
+        Resultado = $"Monto={result.MontoAguinaldo}; Dias={dias}; MesesEq={decimal.Round(mesesEquivalentes, 6)}",
         Fecha = DateTime.Now
     };
 
@@ -164,6 +210,7 @@ public async Task<IActionResult> CalcularAguinaldo([FromBody] AguinaldoInput inp
         mensaje = "Cálculo de aguinaldo realizado con éxito."
     });
 }
+
 
 // ===========================================================
 // CALCULADORA #4 → ISR LABORAL (Empleado)
