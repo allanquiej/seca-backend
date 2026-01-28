@@ -734,5 +734,231 @@ namespace SecaBackend.Controllers
             result.NotasLegales.Add("Plazo para reclamar otras prestaciones: 2 años.");
             result.NotasLegales.Add("Consulte con un abogado laboralista para casos específicos.");
         }
+        // ===========================================================
+        // 🆕 CALCULADORA #8 → ISR ASALARIADO - ✅ CORREGIDO
+        // Ruta: POST /api/calculadoras/isr-asalariado
+        // ===========================================================
+        [HttpPost("isr-asalariado")]
+        public async Task<IActionResult> CalcularISRAsalariado([FromBody] ISRAsalariadoInput input)
+        {
+            if (input.SalariosAnuales < 0 || input.Bono14 < 0 || input.Aguinaldo < 0 || input.OtrosBonos < 0)
+            {
+                return BadRequest(new { exito = false, mensaje = "Los ingresos no pueden ser negativos." });
+            }
+
+            decimal totalIngresos = input.SalariosAnuales + input.Bono14 + input.Aguinaldo + input.OtrosBonos;
+            const decimal deduccionPersonal = 48000m;
+            decimal baseImponible = totalIngresos - deduccionPersonal;
+            
+            if (baseImponible <= 0)
+            {
+                var resultSinISR = new ISRAsalariadoResult
+                {
+                    TotalIngresos = totalIngresos,
+                    DeduccionPersonal = deduccionPersonal,
+                    BaseImponible = 0,
+                    ISRTotal = 0,
+                    ISRMensual = 0,
+                    TipoCalculo = input.EsProyectado ? "Proyectado" : "Definitiva",
+                    DetalleCalculo = $"Total ingresos: Q{totalIngresos:F2}; Deducción: Q{deduccionPersonal:F2}; No aplica ISR"
+                };
+                return Ok(new { exito = true, datos = resultSinISR, mensaje = "No aplica ISR." });
+            }
+
+            decimal isrTotal = baseImponible * 0.05m;
+            decimal isrMensual = input.EsProyectado ? (isrTotal / 12m) : 0;
+
+            var result = new ISRAsalariadoResult
+            {
+                TotalIngresos = decimal.Round(totalIngresos, 2),
+                DeduccionPersonal = decimal.Round(deduccionPersonal, 2),
+                BaseImponible = decimal.Round(baseImponible, 2),
+                ISRTotal = decimal.Round(isrTotal, 2),
+                ISRMensual = decimal.Round(isrMensual, 2),
+                TipoCalculo = input.EsProyectado ? "Proyectado" : "Definitiva",
+                DetalleCalculo = $"Total: Q{totalIngresos:F2}; Deducción: Q{deduccionPersonal:F2}; Base: Q{baseImponible:F2}; ISR: Q{isrTotal:F2}" +
+                               (input.EsProyectado ? $"; Mensual: Q{isrMensual:F2}" : "")
+            };
+
+            var log = new CalculatorLog
+            {
+                TipoCalculadora = "ISR Asalariado",
+                DatosEntrada = $"Salarios={input.SalariosAnuales}; Bono14={input.Bono14}; Aguinaldo={input.Aguinaldo}",
+                Resultado = $"ISRTotal={result.ISRTotal}; ISRMensual={result.ISRMensual}",
+                Fecha = DateTime.Now
+            };
+            _context.CalculatorLogs.Add(log);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { exito = true, datos = result, mensaje = "ISR asalariado calculado." });
+        }
+
+        // ===========================================================
+        // 🆕 CALCULADORA #9 → ISR EMPRESA MENSUAL V2 - ✅ CORREGIDO
+        // Ruta: POST /api/calculadoras/isr-empresa-mensual-v2
+        // ===========================================================
+        [HttpPost("isr-empresa-mensual-v2")]
+        public async Task<IActionResult> CalcularISREmpresaMensualV2([FromBody] ISREmpresaMensualV2Input input)
+        {
+            if (input.TotalFacturacionMes <= 0)
+            {
+                return BadRequest(new { exito = false, mensaje = "La facturación debe ser mayor a 0." });
+            }
+            if (input.TotalRetenciones < 0)
+            {
+                return BadRequest(new { exito = false, mensaje = "Las retenciones no pueden ser negativas." });
+            }
+
+            decimal baseCalculo = input.TotalFacturacionMes / 1.12m;
+            decimal iva = baseCalculo * 0.12m;
+            
+            decimal isrPrimerosTreintaMil = 0;
+            decimal isrExcedente = 0;
+            
+            if (baseCalculo <= 30000m)
+            {
+                isrPrimerosTreintaMil = baseCalculo * 0.05m;
+            }
+            else
+            {
+                isrPrimerosTreintaMil = 30000m * 0.05m;
+                decimal excedente = baseCalculo - 30000m;
+                isrExcedente = excedente * 0.07m;
+            }
+
+            decimal isrTotal = isrPrimerosTreintaMil + isrExcedente;
+            decimal isrAPagar = isrTotal - input.TotalRetenciones;
+            if (isrAPagar < 0) isrAPagar = 0;
+
+            var result = new ISREmpresaMensualV2Result
+            {
+                Base = decimal.Round(baseCalculo, 2),
+                IVA = decimal.Round(iva, 2),
+                ISRPrimerosTreintaMil = decimal.Round(isrPrimerosTreintaMil, 2),
+                ISRExcedente = decimal.Round(isrExcedente, 2),
+                ISRTotal = decimal.Round(isrTotal, 2),
+                ISRAPagar = decimal.Round(isrAPagar, 2),
+                DetalleCalculo = $"Facturación: Q{input.TotalFacturacionMes:F2}; Base: Q{baseCalculo:F2}; ISR 5%: Q{isrPrimerosTreintaMil:F2}; ISR 7%: Q{isrExcedente:F2}; Total: Q{isrTotal:F2}; A pagar: Q{isrAPagar:F2}"
+            };
+
+            var log = new CalculatorLog
+            {
+                TipoCalculadora = "ISR Empresa Mensual V2",
+                DatosEntrada = $"Facturación={input.TotalFacturacionMes}; Retenciones={input.TotalRetenciones}",
+                Resultado = $"ISRTotal={result.ISRTotal}; ISRAPagar={result.ISRAPagar}",
+                Fecha = DateTime.Now
+            };
+            _context.CalculatorLogs.Add(log);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { exito = true, datos = result, mensaje = "ISR mensual calculado." });
+        }
+
+        // ===========================================================
+        // 🆕 CALCULADORA #10 → ISR TRIMESTRAL V2 - ✅ CORREGIDO
+        // Ruta: POST /api/calculadoras/isr-empresa-trimestral-v2
+        // ===========================================================
+        [HttpPost("isr-empresa-trimestral-v2")]
+        public async Task<IActionResult> CalcularISRTrimestralV2([FromBody] ISRTrimestralV2Input input)
+        {
+            if (input.ISOPendiente < 0)
+            {
+                return BadRequest(new { exito = false, mensaje = "El ISO pendiente no puede ser negativo." });
+            }
+
+            ISRTrimestralV2Result result;
+
+            if (input.UsarOpcionAcumulada)
+            {
+                if (input.VentasAcumuladas < 0 || input.GastosAcumulados < 0)
+                {
+                    return BadRequest(new { exito = false, mensaje = "Las ventas y gastos no pueden ser negativos." });
+                }
+
+                decimal baseCalculo = input.VentasAcumuladas - input.GastosAcumulados;
+                
+                if (baseCalculo <= 0)
+                {
+                    result = new ISRTrimestralV2Result
+                    {
+                        OpcionUtilizada = "Opción 1 - Acumulado",
+                        BaseCalculo = 0,
+                        ISRCalculado = 0,
+                        ISOAcreditar = 0,
+                        ISRAPagar = 0,
+                        DetalleCalculo = $"Ventas: Q{input.VentasAcumuladas:F2}; Gastos: Q{input.GastosAcumulados:F2}; No aplica ISR"
+                    };
+                }
+                else
+                {
+                    decimal isrCalculado = baseCalculo * 0.25m;
+                    decimal isoAcreditar = Math.Min(input.ISOPendiente, isrCalculado);
+                    decimal isrAPagar = isrCalculado - isoAcreditar;
+                    if (isrAPagar < 0) isrAPagar = 0;
+
+                    result = new ISRTrimestralV2Result
+                    {
+                        OpcionUtilizada = "Opción 1 - Acumulado",
+                        BaseCalculo = decimal.Round(baseCalculo, 2),
+                        ISRCalculado = decimal.Round(isrCalculado, 2),
+                        ISOAcreditar = decimal.Round(isoAcreditar, 2),
+                        ISRAPagar = decimal.Round(isrAPagar, 2),
+                        DetalleCalculo = $"Ventas: Q{input.VentasAcumuladas:F2}; Gastos: Q{input.GastosAcumulados:F2}; Base: Q{baseCalculo:F2}; ISR 25%: Q{isrCalculado:F2}; ISO: Q{isoAcreditar:F2}; A pagar: Q{isrAPagar:F2}"
+                    };
+                }
+            }
+            else
+            {
+                if (input.VentasTrimestre < 0)
+                {
+                    return BadRequest(new { exito = false, mensaje = "Las ventas no pueden ser negativas." });
+                }
+
+                if (input.VentasTrimestre == 0)
+                {
+                    result = new ISRTrimestralV2Result
+                    {
+                        OpcionUtilizada = "Opción 2 - Trimestre",
+                        BaseCalculo = 0,
+                        ISRCalculado = 0,
+                        ISOAcreditar = 0,
+                        ISRAPagar = 0,
+                        DetalleCalculo = "Ventas: Q0.00; No aplica ISR"
+                    };
+                }
+                else
+                {
+                    decimal baseCalculo = input.VentasTrimestre;
+                    decimal isrCalculado = baseCalculo * 0.25m;
+                    decimal isoAcreditar = Math.Min(input.ISOPendiente, isrCalculado);
+                    decimal isrAPagar = isrCalculado - isoAcreditar;
+                    if (isrAPagar < 0) isrAPagar = 0;
+
+                    result = new ISRTrimestralV2Result
+                    {
+                        OpcionUtilizada = "Opción 2 - Trimestre",
+                        BaseCalculo = decimal.Round(baseCalculo, 2),
+                        ISRCalculado = decimal.Round(isrCalculado, 2),
+                        ISOAcreditar = decimal.Round(isoAcreditar, 2),
+                        ISRAPagar = decimal.Round(isrAPagar, 2),
+                        DetalleCalculo = $"Ventas: Q{input.VentasTrimestre:F2}; ISR 25%: Q{isrCalculado:F2}; ISO: Q{isoAcreditar:F2}; A pagar: Q{isrAPagar:F2}"
+                    };
+                }
+            }
+
+            var log = new CalculatorLog
+            {
+                TipoCalculadora = "ISR Trimestral V2",
+                DatosEntrada = input.UsarOpcionAcumulada 
+                    ? $"Ventas={input.VentasAcumuladas}; Gastos={input.GastosAcumulados}; ISO={input.ISOPendiente}"
+                    : $"Ventas={input.VentasTrimestre}; ISO={input.ISOPendiente}",
+                Resultado = $"ISR={result.ISRCalculado}; APagar={result.ISRAPagar}",
+                Fecha = DateTime.Now
+            };
+            _context.CalculatorLogs.Add(log);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { exito = true, datos = result, mensaje = $"ISR trimestral calculado ({result.OpcionUtilizada})." });
+        }
     }
 }
