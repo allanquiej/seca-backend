@@ -960,5 +960,151 @@ namespace SecaBackend.Controllers
 
             return Ok(new { exito = true, datos = result, mensaje = $"ISR trimestral calculado ({result.OpcionUtilizada})." });
         }
+        // ===========================================================
+        // 🆕 CALCULADORA #11 → IVA (Impuesto al Valor Agregado)
+        // Ruta: POST /api/calculadoras/iva
+        // Calcula el IVA según el régimen: General, Pequeño Contribuyente, Exento
+        // ===========================================================
+        [HttpPost("iva")]
+        public async Task<IActionResult> CalcularIVA([FromBody] IVAInput input)
+        {
+            IVAResult result;
+
+            switch (input.Regimen)
+            {
+                case RegimenIVA.General:
+                    // ====================================
+                    // RÉGIMEN GENERAL (12%)
+                    // ====================================
+                    
+                    if (input.VentasMes < 0 || input.ComprasMes < 0 || input.Retenciones < 0)
+                    {
+                        return BadRequest(new { exito = false, mensaje = "Los montos no pueden ser negativos." });
+                    }
+
+                    // Calcular débito fiscal (IVA en ventas)
+                    decimal baseVentas = input.VentasMes / 1.12m;
+                    decimal debitoFiscal = baseVentas * 0.12m;
+
+                    // Calcular crédito fiscal (IVA en compras)
+                    decimal baseCompras = input.ComprasMes / 1.12m;
+                    decimal creditoFiscal = baseCompras * 0.12m;
+
+                    // IVA bruto = Débito - Crédito
+                    decimal ivaBruto = debitoFiscal - creditoFiscal;
+
+                    // IVA a pagar = IVA Bruto - Retenciones
+                    decimal ivaAPagar = ivaBruto - input.Retenciones;
+                    
+                    // Si es negativo, hay saldo a favor
+                    if (ivaAPagar < 0) ivaAPagar = 0;
+
+                    result = new IVAResult
+                    {
+                        RegimenNombre = "Régimen General (IVA 12%)",
+                        DebitoFiscal = decimal.Round(debitoFiscal, 2),
+                        CreditoFiscal = decimal.Round(creditoFiscal, 2),
+                        IVABruto = decimal.Round(ivaBruto, 2),
+                        IVAAPagar = decimal.Round(ivaAPagar, 2),
+                        CuotaFija = 0,
+                        Aplica = true,
+                        Mensaje = ivaBruto < 0 
+                            ? "Tienes saldo a favor. Puedes solicitarlo en devolución o acreditarlo al siguiente mes."
+                            : "IVA calculado correctamente.",
+                        DetalleCalculo = $"Ventas: Q{input.VentasMes:F2}; Base ventas: Q{baseVentas:F2}; " +
+                                       $"Débito fiscal (12%): Q{debitoFiscal:F2}; " +
+                                       $"Compras: Q{input.ComprasMes:F2}; Base compras: Q{baseCompras:F2}; " +
+                                       $"Crédito fiscal (12%): Q{creditoFiscal:F2}; " +
+                                       $"IVA bruto: Q{ivaBruto:F2}; Retenciones: Q{input.Retenciones:F2}; " +
+                                       $"IVA a pagar: Q{ivaAPagar:F2}"
+                    };
+                    break;
+
+                case RegimenIVA.PequenoContribuyente:
+                    // ====================================
+                    // PEQUEÑO CONTRIBUYENTE (Cuota fija)
+                    // ====================================
+                    
+                    if (input.IngresosAnuales < 0)
+                    {
+                        return BadRequest(new { exito = false, mensaje = "Los ingresos anuales no pueden ser negativos." });
+                    }
+
+                    const decimal limitePequenoContribuyente = 150000m;
+                    const decimal cuotaFija = 150m;
+
+                    if (input.IngresosAnuales > limitePequenoContribuyente)
+                    {
+                        result = new IVAResult
+                        {
+                            RegimenNombre = "Pequeño Contribuyente",
+                            DebitoFiscal = 0,
+                            CreditoFiscal = 0,
+                            IVABruto = 0,
+                            IVAAPagar = 0,
+                            CuotaFija = 0,
+                            Aplica = false,
+                            Mensaje = $"No aplicas para Pequeño Contribuyente. Tus ingresos anuales (Q{input.IngresosAnuales:F2}) " +
+                                    $"superan el límite de Q{limitePequenoContribuyente:F2}. Debes inscribirte en Régimen General.",
+                            DetalleCalculo = $"Ingresos anuales: Q{input.IngresosAnuales:F2}; " +
+                                           $"Límite: Q{limitePequenoContribuyente:F2}; No aplica este régimen."
+                        };
+                    }
+                    else
+                    {
+                        result = new IVAResult
+                        {
+                            RegimenNombre = "Pequeño Contribuyente",
+                            DebitoFiscal = 0,
+                            CreditoFiscal = 0,
+                            IVABruto = 0,
+                            IVAAPagar = cuotaFija,
+                            CuotaFija = cuotaFija,
+                            Aplica = true,
+                            Mensaje = "Como Pequeño Contribuyente, pagas una cuota fija mensual de Q150.00",
+                            DetalleCalculo = $"Ingresos anuales: Q{input.IngresosAnuales:F2}; " +
+                                           $"Límite: Q{limitePequenoContribuyente:F2}; " +
+                                           $"Cuota fija mensual: Q{cuotaFija:F2}"
+                        };
+                    }
+                    break;
+
+                case RegimenIVA.Exento:
+                    // ====================================
+                    // EXENTO DE IVA
+                    // ====================================
+                    
+                    result = new IVAResult
+                    {
+                        RegimenNombre = "Exento de IVA",
+                        DebitoFiscal = 0,
+                        CreditoFiscal = 0,
+                        IVABruto = 0,
+                        IVAAPagar = 0,
+                        CuotaFija = 0,
+                        Aplica = true,
+                        Mensaje = "Tu actividad está exenta de IVA. No debes pagar este impuesto.",
+                        DetalleCalculo = "Actividad exenta según la Ley del IVA. IVA a pagar: Q0.00"
+                    };
+                    break;
+
+                default:
+                    return BadRequest(new { exito = false, mensaje = "Régimen de IVA no válido." });
+            }
+
+            // Log a DB
+            var log = new CalculatorLog
+            {
+                TipoCalculadora = "IVA",
+                DatosEntrada = $"Regimen={input.Regimen}; Ventas={input.VentasMes}; Compras={input.ComprasMes}; " +
+                              $"Retenciones={input.Retenciones}; IngresosAnuales={input.IngresosAnuales}",
+                Resultado = $"IVAAPagar={result.IVAAPagar}; Aplica={result.Aplica}",
+                Fecha = DateTime.Now
+            };
+            _context.CalculatorLogs.Add(log);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { exito = true, datos = result, mensaje = "IVA calculado con éxito." });
+        }
     }
 }
