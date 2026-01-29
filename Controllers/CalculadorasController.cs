@@ -345,49 +345,165 @@ namespace SecaBackend.Controllers
         }
 
         // ===========================================================
-        // CALCULADORA #7 → ISO TRIMESTRAL
-        // Ruta: POST /api/calculadoras/iso-trimestral
-        // ===========================================================
-        [HttpPost("iso-trimestral")]
-        public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOInput input)
-        {
-            if (input.IngresosTrimestrales <= 0)
-            {
-                return BadRequest(new
-                {
-                    exito = false,
-                    mensaje = "Los ingresos trimestrales deben ser mayores a 0."
-                });
-            }
+// CALCULADORA ISO TRIMESTRAL - SEGÚN SAT
+// Ruta: POST /api/calculadoras/iso-trimestral
+// 
+// Fuente: Superintendencia de Administración Tributaria (SAT)
+// Ley del ISO: Decreto 73-2008
+// 
+// El contribuyente debe calcular el ISO de DOS formas y pagar el MAYOR:
+// 1. ISO sobre Ingresos Brutos: (Ingresos Anuales / 4) × 1%
+// 2. ISO sobre Activo Neto: ((Activo Neto / 4) × 1%) - IUSI Pagado
+// ===========================================================
+[HttpPost("iso-trimestral")]
+public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralInput input)
+{
+    // ========================================
+    // VALIDACIONES
+    // ========================================
+    if (input.IngresosBrutosAnuales < 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "Los ingresos brutos no pueden ser negativos." });
+    }
+    
+    if (input.ActivoTotal < 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "El activo total no puede ser negativo." });
+    }
 
-            // Fórmula del ISO: 1% de ingresos trimestrales
-            decimal iso = input.IngresosTrimestrales * 0.01m;
 
-            var result = new ISOResult
-            {
-                ISOCalculado = iso,
-                DetalleCalculo = $"ISO = {input.IngresosTrimestrales} × 0.01"
-            };
+    // ========================================
+    // OPCIÓN 1: ISO SOBRE INGRESOS BRUTOS
+    // ========================================
+    // Fórmula: (Ingresos Brutos Anuales / 4) × 1%
+    
+    decimal baseTrimestralIngresos = input.IngresosBrutosAnuales / 4m;
+    decimal isoSobreIngresos = baseTrimestralIngresos * 0.01m;
+    
+    string detalleIngresos = $"Ingresos Brutos Anuales: Q{input.IngresosBrutosAnuales:F2}; " +
+                            $"Base Trimestral (÷4): Q{baseTrimestralIngresos:F2}; " +
+                            $"ISO 1%: Q{isoSobreIngresos:F2}";
 
-            // Guardar el log en la base
-            var log = new CalculatorLog
-            {
-                TipoCalculadora = "ISO Trimestral",
-                DatosEntrada = $"IngresosTrimestrales={input.IngresosTrimestrales}",
-                Resultado = $"ISO={result.ISOCalculado}",
-                Fecha = DateTime.Now
-            };
 
-            _context.CalculatorLogs.Add(log);
-            await _context.SaveChangesAsync();
+    // ========================================
+    // OPCIÓN 2: ISO SOBRE ACTIVO NETO
+    // ========================================
+    // Fórmula: 
+    // 1. Activo Neto = Activo Total - Dep. y Amort. Acum. - Reserva Ctas. Incob. - Créditos Reint.
+    // 2. Base Trimestral = Activo Neto / 4
+    // 3. ISO = Base Trimestral × 1%
+    // 4. ISO Final = ISO - IUSI Pagado
+    
+    decimal activoNeto = input.ActivoTotal 
+                       - input.DepreciacionAmortizacionAcumulada 
+                       - input.ReservaCuentasIncobrables 
+                       - input.CreditosReinversion;
+    
+    // El activo neto no puede ser negativo
+    if (activoNeto < 0) activoNeto = 0;
+    
+    decimal baseTrimestralActivo = activoNeto / 4m;
+    decimal isoSobreActivoNeto = baseTrimestralActivo * 0.01m;
+    
+    // Restar IUSI pagado (solo aplica para Activo Neto)
+    decimal isoSobreActivoNetoFinal = isoSobreActivoNeto - input.IUSIPagado;
+    if (isoSobreActivoNetoFinal < 0) isoSobreActivoNetoFinal = 0;
+    
+    string detalleActivo = $"Activo Total: Q{input.ActivoTotal:F2}; " +
+                          $"Dep./Amort. Acum.: Q{input.DepreciacionAmortizacionAcumulada:F2}; " +
+                          $"Reserva Ctas. Incob.: Q{input.ReservaCuentasIncobrables:F2}; " +
+                          $"Créditos Reint.: Q{input.CreditosReinversion:F2}; " +
+                          $"Activo Neto: Q{activoNeto:F2}; " +
+                          $"Base Trimestral (÷4): Q{baseTrimestralActivo:F2}; " +
+                          $"ISO 1%: Q{isoSobreActivoNeto:F2}; " +
+                          $"IUSI Pagado: Q{input.IUSIPagado:F2}; " +
+                          $"ISO Final: Q{isoSobreActivoNetoFinal:F2}";
 
-            return Ok(new
-            {
-                exito = true,
-                datos = result,
-                mensaje = "ISO trimestral calculado con éxito."
-            });
-        }
+
+    // ========================================
+    // DETERMINAR EL ISO A PAGAR
+    // ========================================
+    // Según la SAT: Se paga el MAYOR entre las dos opciones
+    
+    decimal isoAPagar;
+    string metodoUtilizado;
+    string mensaje;
+    
+    if (isoSobreIngresos > isoSobreActivoNetoFinal)
+    {
+        isoAPagar = isoSobreIngresos;
+        metodoUtilizado = "ISO sobre Ingresos Brutos";
+        mensaje = "Se utiliza el método de Ingresos Brutos porque resulta en un monto mayor.";
+    }
+    else
+    {
+        isoAPagar = isoSobreActivoNetoFinal;
+        metodoUtilizado = "ISO sobre Activo Neto";
+        mensaje = "Se utiliza el método de Activo Neto porque resulta en un monto mayor.";
+    }
+
+
+    // ========================================
+    // CONSTRUIR RESULTADO
+    // ========================================
+    var result = new ISOTrimestralResult
+    {
+        // Cálculo sobre Ingresos
+        IngresosBrutosAnuales = decimal.Round(input.IngresosBrutosAnuales, 2),
+        BaseTrimestralIngresos = decimal.Round(baseTrimestralIngresos, 2),
+        ISOSobreIngresos = decimal.Round(isoSobreIngresos, 2),
+        
+        // Cálculo sobre Activo
+        ActivoTotal = decimal.Round(input.ActivoTotal, 2),
+        DepreciacionAmortizacionAcumulada = decimal.Round(input.DepreciacionAmortizacionAcumulada, 2),
+        ReservaCuentasIncobrables = decimal.Round(input.ReservaCuentasIncobrables, 2),
+        CreditosReinversion = decimal.Round(input.CreditosReinversion, 2),
+        ActivoNeto = decimal.Round(activoNeto, 2),
+        BaseTrimestralActivo = decimal.Round(baseTrimestralActivo, 2),
+        ISOSobreActivoNeto = decimal.Round(isoSobreActivoNeto, 2),
+        IUSIPagado = decimal.Round(input.IUSIPagado, 2),
+        ISOSobreActivoNetoFinal = decimal.Round(isoSobreActivoNetoFinal, 2),
+        
+        // Resultado final
+        ISOAPagar = decimal.Round(isoAPagar, 2),
+        MetodoUtilizado = metodoUtilizado,
+        
+        // Detalles
+        DetalleCalculoIngresos = detalleIngresos,
+        DetalleCalculoActivo = detalleActivo,
+        Mensaje = mensaje,
+        RecomendacionLegal = "Según el Decreto 73-2008 (Ley del ISO), el contribuyente debe calcular el impuesto " +
+                           "por ambos métodos y pagar el que resulte mayor. El ISO pagado puede acreditarse al ISR " +
+                           "del mismo período tributario."
+    };
+
+
+    // ========================================
+    // GUARDAR LOG EN BASE DE DATOS
+    // ========================================
+    var log = new CalculatorLog
+    {
+        TipoCalculadora = "ISO Trimestral",
+        DatosEntrada = $"Ingresos={input.IngresosBrutosAnuales}; ActivoTotal={input.ActivoTotal}; " +
+                      $"ActivoNeto={activoNeto}; IUSI={input.IUSIPagado}",
+        Resultado = $"ISOAPagar={result.ISOAPagar}; Método={metodoUtilizado}",
+        Fecha = DateTime.Now
+    };
+    
+    _context.CalculatorLogs.Add(log);
+    await _context.SaveChangesAsync();
+
+
+    // ========================================
+    // RETORNAR RESPUESTA
+    // ========================================
+    return Ok(new 
+    { 
+        exito = true, 
+        datos = result, 
+        mensaje = "ISO trimestral calculado correctamente según normativa SAT." 
+    });
+}
 
         // ===========================================================
         // 🆕 CALCULADORA #8 → PRESTACIONES LABORALES COMPLETAS
