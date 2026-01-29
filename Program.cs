@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SecaBackend.Data;
 using SecaBackend.Models;
+using System.Text.Json.Serialization; // ✅ AÑADIDO
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,10 +13,20 @@ var builder = WebApplication.CreateBuilder(args);
 // 1) REGISTRO DE SERVICIOS
 // =========================
 
-// Con esta línea agrego soporte para "Controllers".
-// Los controllers son clases donde voy a escribir las rutas de mi API,
-// por ejemplo: /api/status, /api/calculadoras, /api/chatbot, etc.
-builder.Services.AddControllers();
+// ✅ CONFIGURACIÓN IMPORTANTE: Serializar JSON en camelCase
+// Esto hace que las propiedades C# como "DebitoFiscal" se conviertan a "debitoFiscal" en JSON
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Convierte PascalCase (C#) a camelCase (JavaScript/TypeScript)
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        
+        // Permite que los enums se serialicen como strings en lugar de números
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        
+        // Ignora valores null en el JSON (opcional, pero ayuda a reducir el tamaño)
+        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    });
 
 // =========================
 // 1.5) CONFIGURACIÓN DE CORS
