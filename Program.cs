@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SecaBackend.Data;
 using SecaBackend.Models;
-using System.Text.Json.Serialization; // ✅ AÑADIDO
+using System.Text.Json.Serialization; // ⭐ NUEVO: Necesario para JsonStringEnumConverter
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,20 +13,26 @@ var builder = WebApplication.CreateBuilder(args);
 // 1) REGISTRO DE SERVICIOS
 // =========================
 
-// ✅ CONFIGURACIÓN IMPORTANTE: Serializar JSON en camelCase
-// Esto hace que las propiedades C# como "DebitoFiscal" se conviertan a "debitoFiscal" en JSON
+// ⭐⭐⭐ CAMBIO IMPORTANTE AQUÍ ⭐⭐⭐
+// ANTES (línea 18 del archivo viejo):
+// builder.Services.AddControllers();
+//
+// AHORA (con configuración JSON para camelCase):
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        // Convierte PascalCase (C#) a camelCase (JavaScript/TypeScript)
+        // ⭐ Convierte PascalCase (C#) a camelCase (JavaScript)
+        // Ejemplo: "DebitoFiscal" → "debitoFiscal"
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
         
-        // Permite que los enums se serialicen como strings en lugar de números
+        // ⭐ Serializa enums como strings en lugar de números
+        // Ejemplo: RegimenIVA.General → "general" en lugar de 1
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
         
-        // Ignora valores null en el JSON (opcional, pero ayuda a reducir el tamaño)
+        // ⭐ Ignora propiedades con valor null (reduce tamaño del JSON)
         options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     });
+// ⭐⭐⭐ FIN DEL CAMBIO ⭐⭐⭐
 
 // =========================
 // 1.5) CONFIGURACIÓN DE CORS
