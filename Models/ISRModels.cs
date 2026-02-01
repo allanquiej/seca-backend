@@ -1,3 +1,6 @@
+// ✅ ARCHIVO COMPLETO - REEMPLAZAR TODO
+// Ubicación: SECA-BACKEND/Models/ISRModels.cs
+
 namespace SecaBackend.Models
 {
     // ===============================================
@@ -16,29 +19,56 @@ namespace SecaBackend.Models
     }
 
     // ===============================================
-    // 🆕 MODELOS NUEVOS - ISR ASALARIADO (CORRECTO)
+    // ✅ MODELOS NUEVOS - ISR ASALARIADO (CORREGIDO)
     // ===============================================
     
     public class ISRAsalariadoInput
     {
-        // Ingresos anuales (enero-diciembre)
-        public decimal SalariosAnuales { get; set; }
+        // ✅ CAMPOS NUEVOS:
+        public decimal SalarioOrdinarioMensual { get; set; }
+        public decimal BonificacionIncentivo { get; set; }
+        
+        // Campos existentes
         public decimal Bono14 { get; set; }
         public decimal Aguinaldo { get; set; }
         public decimal OtrosBonos { get; set; }
         
         // Tipo de cálculo
-        public bool EsProyectado { get; set; } // true = mensual, false = definitiva anual
+        public bool EsProyectado { get; set; }
     }
     
     public class ISRAsalariadoResult
     {
-        public decimal TotalIngresos { get; set; }
-        public decimal DeduccionPersonal { get; set; } // Q48,000
-        public decimal BaseImponible { get; set; }
-        public decimal ISRTotal { get; set; } // 5% sobre base
-        public decimal ISRMensual { get; set; } // Solo si es proyectado
-        public string TipoCalculo { get; set; } = string.Empty; // "Proyectado" o "Definitiva"
+        // ✅ ESTRUCTURA COMPLETAMENTE NUEVA
+        
+        // Renta Bruta
+        public decimal SalariosAnuales { get; set; }
+        public decimal BonificacionAnual { get; set; }
+        public decimal Aguinaldo { get; set; }
+        public decimal Bono14 { get; set; }
+        public decimal OtrosBonos { get; set; }
+        public decimal TotalRentaBruta { get; set; }
+        
+        // Rentas Exentas
+        public decimal AguinaldoExento { get; set; }
+        public decimal Bono14Exento { get; set; }
+        public decimal TotalRentasExentas { get; set; }
+        
+        // Renta Neta
+        public decimal RentaNeta { get; set; }
+        
+        // Deducciones
+        public decimal GastosPersonales { get; set; }
+        public decimal CuotaIGSS { get; set; }
+        public decimal TotalDeducciones { get; set; }
+        
+        // Resultado
+        public decimal RentaImponible { get; set; }
+        public decimal ISRAnual { get; set; }
+        public decimal RetencionMensual { get; set; }
+        
+        // Metadatos
+        public string TipoCalculo { get; set; } = string.Empty;
         public string DetalleCalculo { get; set; } = string.Empty;
     }
 }
