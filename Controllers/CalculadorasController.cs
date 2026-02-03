@@ -208,51 +208,351 @@ namespace SecaBackend.Controllers
         }
 
 
-        // ===========================================================
-        // CALCULADORA #4 → ISR LABORAL (Empleado)
-        // Ruta: POST /api/calculadoras/isr-laboral
-        // ===========================================================
-        [HttpPost("isr-laboral")]
-        public async Task<IActionResult> CalcularISRLaboral([FromBody] ISRInput input)
+// ✅ MÉTODO ACTUALIZADO - REEMPLAZAR el método CalcularISRAsalariado en CalculadorasController.cs
+// Buscar desde línea ~861 y reemplazar TODO el método
+
+// ===========================================================
+// ✅ CALCULADORA ISR ASALARIADO - ACTUALIZADO SEGÚN SAT-1901
+// Ruta: POST /api/calculadoras/isr-asalariado
+// ===========================================================
+[HttpPost("isr-asalariado")]
+public async Task<IActionResult> CalcularISRAsalariado([FromBody] ISRAsalariadoInput input)
+{
+    // ========================================
+    // VALIDACIONES
+    // ========================================
+    
+    if (input.AnioImposicion < 2020 || input.AnioImposicion > 2030)
+    {
+        return BadRequest(new { exito = false, mensaje = "Año de imposición no válido." });
+    }
+    
+    if (input.MesInicio < 1 || input.MesInicio > 12)
+    {
+        return BadRequest(new { exito = false, mensaje = "Mes de inicio no válido (1-12)." });
+    }
+    
+    if (input.NumeroPatronos < 1)
+    {
+        return BadRequest(new { exito = false, mensaje = "Debe especificar al menos un patrono." });
+    }
+
+    // ========================================
+    // PASO 1: CALCULAR TOTAL DE SALARIOS ANUALES
+    // ========================================
+    
+    decimal totalSalariosAnuales = 0m;
+    decimal bonificacionAnual = 0m;
+    
+    if (input.NumeroPatronos == 1)
+    {
+        // UN SOLO PATRONO
+        if (input.SueldoIgualDurante12Meses)
         {
-            if (input.SueldoMensual <= 0)
-            {
-                return BadRequest(new
-                {
-                    exito = false,
-                    mensaje = "El sueldo mensual debe ser mayor a 0."
-                });
-            }
-
-            // Fórmula simplificada:
-            // ISR = 5% del salario mensual
-            decimal isr = input.SueldoMensual * 0.05m;
-
-            var result = new ISRResult
-            {
-                ISRCalculado = isr,
-                DetalleCalculo = $"ISR = {input.SueldoMensual} × 0.05"
-            };
-
-            // Registrar log en la base de datos
-            var log = new CalculatorLog
-            {
-                TipoCalculadora = "ISR Laboral",
-                DatosEntrada = $"SueldoMensual={input.SueldoMensual}",
-                Resultado = $"ISR={result.ISRCalculado}",
-                Fecha = DateTime.Now
-            };
-
-            _context.CalculatorLogs.Add(log);
-            await _context.SaveChangesAsync();
-
-            return Ok(new
-            {
-                exito = true,
-                datos = result,
-                mensaje = "ISR laboral calculado con éxito."
-            });
+            // Sueldo igual durante 12 meses
+            totalSalariosAnuales = input.SalarioOrdinarioMensual * 12m;
+            bonificacionAnual = input.BonificacionIncentivo * 12m;
         }
+        else
+        {
+            // Suma de los 12 meses (si están proporcionados)
+            totalSalariosAnuales = 
+                (input.SalarioEnero ?? 0m) +
+                (input.SalarioFebrero ?? 0m) +
+                (input.SalarioMarzo ?? 0m) +
+                (input.SalarioAbril ?? 0m) +
+                (input.SalarioMayo ?? 0m) +
+                (input.SalarioJunio ?? 0m) +
+                (input.SalarioJulio ?? 0m) +
+                (input.SalarioAgosto ?? 0m) +
+                (input.SalarioSeptiembre ?? 0m) +
+                (input.SalarioOctubre ?? 0m) +
+                (input.SalarioNoviembre ?? 0m) +
+                (input.SalarioDiciembre ?? 0m);
+            
+            bonificacionAnual = input.BonificacionIncentivo * 12m;
+        }
+    }
+    else
+    {
+        // DOS O MÁS PATRONOS
+        totalSalariosAnuales = 
+            (input.SalariosPatronoPrincipal ?? 0m) + 
+            (input.SalariosOtrosPatronos ?? 0m);
+        
+        bonificacionAnual = input.BonificacionIncentivo * 12m;
+    }
+
+    // ========================================
+    // PASO 2: CALCULAR RENTA BRUTA
+    // ========================================
+    
+    decimal totalRentaBruta = 
+        totalSalariosAnuales +
+        bonificacionAnual +
+        input.Bono14 +
+        input.Aguinaldo +
+        input.HorasExtrasAnuales +
+        input.OtrosBonos;
+
+    // ========================================
+    // PASO 3: CALCULAR SALARIO ORDINARIO MENSUAL
+    // (Para determinar límite de rentas exentas)
+    // ========================================
+    
+    decimal salarioOrdinarioMensual = input.SalarioOrdinarioMensual;
+    
+    // Si no se proporcionó, calculamos el promedio
+    if (salarioOrdinarioMensual == 0m && input.NumeroPatronos == 1 && !input.SueldoIgualDurante12Meses)
+    {
+        salarioOrdinarioMensual = totalSalariosAnuales / 12m;
+    }
+    
+    if (salarioOrdinarioMensual == 0m && input.NumeroPatronos > 1)
+    {
+        // Para múltiples patronos, usamos el promedio sin bonificación
+        salarioOrdinarioMensual = (totalSalariosAnuales / 12m);
+    }
+
+    // ========================================
+    // PASO 4: CALCULAR RENTAS EXENTAS
+    // ========================================
+    
+    // Aguinaldo exento: hasta 100% del salario ordinario mensual
+    decimal aguinaldoExento = Math.Min(input.Aguinaldo, salarioOrdinarioMensual);
+    
+    // Bono 14 exento: hasta 100% del salario ordinario mensual
+    decimal bono14Exento = Math.Min(input.Bono14, salarioOrdinarioMensual);
+    
+    // Suma de todas las rentas exentas
+    decimal totalRentasExentas = 
+        input.IndemnizacionesPorMuerteOIncapacidad +
+        input.IndemnizacionesPorTiempoServido +
+        input.RemuneracionesDiplomaticos +
+        input.GastosRepresentacionYViaticos +
+        aguinaldoExento +
+        bono14Exento;
+
+    // ========================================
+    // PASO 5: CALCULAR RENTA NETA
+    // ========================================
+    
+    decimal rentaNeta = totalRentaBruta - totalRentasExentas;
+    
+    if (rentaNeta < 0)
+    {
+        rentaNeta = 0m;
+    }
+
+    // ========================================
+    // PASO 6: CALCULAR DEDUCCIONES
+    // ========================================
+    
+    // 1. Deducciones personales sin comprobación (Art. 72): Q48,000
+    decimal gastosPersonales = 48000m;
+    
+    // 2. Deducciones personales comprobadas (opcional)
+    decimal deduccionesPersonalesComprobadas = input.DeduccionesPersonalesComprobadas;
+    
+    // 3. Donaciones (opcional, máximo 5% de la renta bruta)
+    decimal donaciones = input.Donaciones;
+    decimal limiteDonaciones = totalRentaBruta * 0.05m;
+    if (donaciones > limiteDonaciones)
+    {
+        donaciones = limiteDonaciones;
+    }
+    
+    // 4. Cuota IGSS: 4.83% sobre la renta neta
+    decimal cuotaIGSS = rentaNeta * 0.0483m;
+    
+    // 5. Primas de seguro de vida (opcional)
+    decimal primasSeguroVida = input.PrimasSeguroVida;
+    
+    // Total deducciones
+    decimal totalDeducciones = 
+        gastosPersonales +
+        deduccionesPersonalesComprobadas +
+        donaciones +
+        cuotaIGSS +
+        primasSeguroVida;
+
+    // ========================================
+    // PASO 7: CALCULAR RENTA IMPONIBLE
+    // ========================================
+    
+    decimal rentaImponible = rentaNeta - totalDeducciones;
+    
+    // Excedente de deducciones
+    decimal excedenteDeducciones = 0m;
+    if (rentaImponible < 0)
+    {
+        excedenteDeducciones = Math.Abs(rentaImponible);
+        rentaImponible = 0m;
+    }
+    else
+    {
+        excedenteDeducciones = gastosPersonales;
+    }
+
+    // ========================================
+    // PASO 8: CALCULAR ISR ANUAL (TABLA PROGRESIVA)
+    // ========================================
+    
+    decimal isrAnual = 0m;
+    
+    if (rentaImponible <= 300000m)
+    {
+        // Rango I: Hasta Q300,000 → 5%
+        isrAnual = rentaImponible * 0.05m;
+    }
+    else
+    {
+        // Rango II: Más de Q300,000 → Q15,000 + 7% sobre excedente
+        decimal excedente = rentaImponible - 300000m;
+        isrAnual = 15000m + (excedente * 0.07m);
+    }
+
+    // ========================================
+    // PASO 9: CALCULAR RETENCIÓN MENSUAL
+    // ========================================
+    
+    decimal retencionMensual = isrAnual / 12m;
+
+    // ========================================
+    // CONSTRUIR RESULTADO
+    // ========================================
+    
+    var result = new ISRAsalariadoResult
+    {
+        // Información general
+        NitEmpleado = input.NitEmpleado,
+        AnioImposicion = input.AnioImposicion,
+        NumeroPatronos = input.NumeroPatronos,
+        SalarioOrdinarioMensual = decimal.Round(salarioOrdinarioMensual, 2),
+        
+        // Sección 4: Renta Bruta
+        SalariosAnuales = decimal.Round(totalSalariosAnuales, 2),
+        BonificacionAnual = decimal.Round(bonificacionAnual, 2),
+        Aguinaldo = decimal.Round(input.Aguinaldo, 2),
+        Bono14 = decimal.Round(input.Bono14, 2),
+        HorasExtras = decimal.Round(input.HorasExtrasAnuales, 2),
+        OtrosBonos = decimal.Round(input.OtrosBonos, 2),
+        TotalRentaBruta = decimal.Round(totalRentaBruta, 2),
+        
+        // Sección 5: Rentas Exentas
+        IndemnizacionesPorMuerteOIncapacidad = decimal.Round(input.IndemnizacionesPorMuerteOIncapacidad, 2),
+        IndemnizacionesPorTiempoServido = decimal.Round(input.IndemnizacionesPorTiempoServido, 2),
+        RemuneracionesDiplomaticos = decimal.Round(input.RemuneracionesDiplomaticos, 2),
+        GastosRepresentacionYViaticos = decimal.Round(input.GastosRepresentacionYViaticos, 2),
+        AguinaldoExento = decimal.Round(aguinaldoExento, 2),
+        Bono14Exento = decimal.Round(bono14Exento, 2),
+        TotalRentasExentas = decimal.Round(totalRentasExentas, 2),
+        RentaNeta = decimal.Round(rentaNeta, 2),
+        
+        // Sección 6: Deducciones
+        GastosPersonales = decimal.Round(gastosPersonales, 2),
+        DeduccionesPersonalesComprobadas = decimal.Round(deduccionesPersonalesComprobadas, 2),
+        Donaciones = decimal.Round(donaciones, 2),
+        CuotaIGSS = decimal.Round(cuotaIGSS, 2),
+        PrimasSeguroVida = decimal.Round(primasSeguroVida, 2),
+        TotalDeducciones = decimal.Round(totalDeducciones, 2),
+        
+        // Resultado
+        RentaImponible = decimal.Round(rentaImponible, 2),
+        ExcedenteDeducciones = decimal.Round(excedenteDeducciones, 2),
+        ISRAnual = decimal.Round(isrAnual, 2),
+        RetencionMensual = decimal.Round(retencionMensual, 2),
+        
+        // Metadatos
+        TipoCalculo = input.EsProyectado ? "Proyectada" : "Definitiva",
+        DetalleCalculo = $"NIT: {input.NitEmpleado}; Período: {input.AnioImposicion}; " +
+                        $"Patronos: {input.NumeroPatronos}; Salario Ordinario Mensual: Q{salarioOrdinarioMensual:F2}; " +
+                        $"Total Salarios Anuales: Q{totalSalariosAnuales:F2}; Renta Bruta: Q{totalRentaBruta:F2}; " +
+                        $"Rentas Exentas: Q{totalRentasExentas:F2}; Renta Neta: Q{rentaNeta:F2}; " +
+                        $"Deducciones: Q{totalDeducciones:F2}; Renta Imponible: Q{rentaImponible:F2}; " +
+                        $"ISR Anual: Q{isrAnual:F2}; Retención Mensual: Q{retencionMensual:F2}"
+    };
+
+    // ========================================
+    // GUARDAR LOG
+    // ========================================
+    
+    var log = new CalculatorLog
+    {
+        TipoCalculadora = "ISR Asalariado",
+        DatosEntrada = $"NIT={input.NitEmpleado}; Periodo={input.AnioImposicion}; " +
+                      $"Patronos={input.NumeroPatronos}; SueldoIgual={input.SueldoIgualDurante12Meses}; " +
+                      $"SalarioOrdinario={input.SalarioOrdinarioMensual}; " +
+                      $"Bonificacion={input.BonificacionIncentivo}",
+        Resultado = $"ISRAnual={result.ISRAnual}; RetencionMensual={result.RetencionMensual}; " +
+                   $"RentaImponible={result.RentaImponible}",
+        Fecha = DateTime.Now
+    };
+
+    _context.CalculatorLogs.Add(log);
+    await _context.SaveChangesAsync();
+
+    // ========================================
+    // RETORNAR RESPUESTA
+    // ========================================
+    
+    return Ok(new
+    {
+        exito = true,
+        datos = result,
+        mensaje = $"ISR Asalariado calculado correctamente según formulario SAT-1901 ({result.TipoCalculo})."
+    });
+}
+
+
+// ===========================================================
+// ⚠️ MANTENER ENDPOINT VIEJO PARA COMPATIBILIDAD
+// (Deprecated - usar /isr-asalariado en su lugar)
+// ===========================================================
+[HttpPost("isr-laboral")]
+[Obsolete("Use /isr-asalariado endpoint instead. This simplified version will be removed in future versions.")]
+public async Task<IActionResult> CalcularISRLaboral([FromBody] ISRInput input)
+{
+    if (input.SueldoMensual <= 0)
+    {
+        return BadRequest(new
+        {
+            exito = false,
+            mensaje = "El sueldo mensual debe ser mayor a 0."
+        });
+    }
+
+    // Fórmula simplificada (DEPRECATED):
+    // ISR = 5% del salario mensual
+    decimal isr = input.SueldoMensual * 0.05m;
+
+    var result = new ISRResult
+    {
+        ISRCalculado = isr,
+        DetalleCalculo = $"[DEPRECADO] Fórmula simplificada: ISR = {input.SueldoMensual} × 0.05. " +
+                        $"Para cálculo correcto según SAT, use /api/calculadoras/isr-asalariado"
+    };
+
+    // Registrar log en la base de datos
+    var log = new CalculatorLog
+    {
+        TipoCalculadora = "ISR Laboral (Deprecated)",
+        DatosEntrada = $"SueldoMensual={input.SueldoMensual}",
+        Resultado = $"ISR={result.ISRCalculado}",
+        Fecha = DateTime.Now
+    };
+
+    _context.CalculatorLogs.Add(log);
+    await _context.SaveChangesAsync();
+
+    return Ok(new
+    {
+        exito = true,
+        datos = result,
+        mensaje = "ISR laboral calculado con éxito. NOTA: Este endpoint está deprecado, use /isr-asalariado para cálculo oficial según SAT.",
+        advertencia = "Este endpoint usa una fórmula simplificada y será removido en versiones futuras. Use /api/calculadoras/isr-asalariado"
+    });
+}
 
         // ===========================================================
         // CALCULADORA #5 → ISR EMPRESAS / EMPRENDEDORES (Mensual)
@@ -850,129 +1150,7 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
             result.NotasLegales.Add("Plazo para reclamar otras prestaciones: 2 años.");
             result.NotasLegales.Add("Consulte con un abogado laboralista para casos específicos.");
         }
-        // ===========================================================
-        // 🆕 CALCULADORA #8 → ISR ASALARIADO - ✅ CORREGIDO
-        // Ruta: POST /api/calculadoras/isr-asalariado
-        // ===========================================================
-        // ===========================================================
-        // ✅ CALCULADORA #7 → ISR ASALARIADO - CORREGIDO SEGÚN SAT
-        // Ruta: POST /api/calculadoras/isr-asalariado
-        // ===========================================================
-        [HttpPost("isr-asalariado")]
-        public async Task<IActionResult> CalcularISRAsalariado([FromBody] ISRAsalariadoInput input)
-        {
-            // Validaciones
-            if (input.SalarioOrdinarioMensual < 0 || input.BonificacionIncentivo < 0 || 
-                input.Bono14 < 0 || input.Aguinaldo < 0 || input.OtrosBonos < 0)
-            {
-                return BadRequest(new { exito = false, mensaje = "Los ingresos no pueden ser negativos." });
-            }
-
-            // PASO 1: CALCULAR RENTA BRUTA
-            decimal salariosAnuales = input.SalarioOrdinarioMensual * 12m;
-            decimal bonificacionAnual = input.BonificacionIncentivo * 12m;
-            decimal totalRentaBruta = salariosAnuales + bonificacionAnual + input.Aguinaldo + input.Bono14 + input.OtrosBonos;
-
-            // PASO 2: CALCULAR RENTAS EXENTAS
-            decimal aguinaldoExento = Math.Min(input.Aguinaldo, input.SalarioOrdinarioMensual);
-            decimal bono14Exento = Math.Min(input.Bono14, input.SalarioOrdinarioMensual);
-            decimal totalRentasExentas = aguinaldoExento + bono14Exento;
-
-            // PASO 3: CALCULAR RENTA NETA
-            decimal rentaNeta = totalRentaBruta - totalRentasExentas;
-
-            // PASO 4: CALCULAR DEDUCCIONES
-            const decimal gastosPersonales = 48000m;
-            decimal cuotaIGSS = salariosAnuales * 0.0483m;
-            decimal totalDeducciones = gastosPersonales + cuotaIGSS;
-
-            // PASO 5: CALCULAR RENTA IMPONIBLE
-            decimal rentaImponible = rentaNeta - totalDeducciones;
-            
-            if (rentaImponible <= 0)
-            {
-                var resultSinISR = new ISRAsalariadoResult
-                {
-                    SalariosAnuales = salariosAnuales,
-                    BonificacionAnual = bonificacionAnual,
-                    Aguinaldo = input.Aguinaldo,
-                    Bono14 = input.Bono14,
-                    OtrosBonos = input.OtrosBonos,
-                    TotalRentaBruta = totalRentaBruta,
-                    AguinaldoExento = aguinaldoExento,
-                    Bono14Exento = bono14Exento,
-                    TotalRentasExentas = totalRentasExentas,
-                    RentaNeta = rentaNeta,
-                    GastosPersonales = gastosPersonales,
-                    CuotaIGSS = decimal.Round(cuotaIGSS, 2),
-                    TotalDeducciones = decimal.Round(totalDeducciones, 2),
-                    RentaImponible = 0,
-                    ISRAnual = 0,
-                    RetencionMensual = 0,
-                    TipoCalculo = input.EsProyectado ? "Proyectada" : "Definitiva",
-                    DetalleCalculo = "No aplica ISR - Renta imponible negativa o cero"
-                };
-                
-                return Ok(new { exito = true, datos = resultSinISR, mensaje = "No aplica ISR." });
-            }
-
-            // PASO 6: APLICAR TABLA PROGRESIVA
-            decimal isrAnual;
-            
-            if (rentaImponible <= 300000m)
-            {
-                isrAnual = rentaImponible * 0.05m;
-            }
-            else
-            {
-                decimal importeFijo = 15000m;
-                decimal excedente = rentaImponible - 300000m;
-                isrAnual = importeFijo + (excedente * 0.07m);
-            }
-
-            // PASO 7: CALCULAR RETENCIÓN MENSUAL
-            decimal retencionMensual = input.EsProyectado ? (isrAnual / 12m) : 0;
-
-            // RESULTADO FINAL
-            var result = new ISRAsalariadoResult
-            {
-                SalariosAnuales = decimal.Round(salariosAnuales, 2),
-                BonificacionAnual = decimal.Round(bonificacionAnual, 2),
-                Aguinaldo = decimal.Round(input.Aguinaldo, 2),
-                Bono14 = decimal.Round(input.Bono14, 2),
-                OtrosBonos = decimal.Round(input.OtrosBonos, 2),
-                TotalRentaBruta = decimal.Round(totalRentaBruta, 2),
-                AguinaldoExento = decimal.Round(aguinaldoExento, 2),
-                Bono14Exento = decimal.Round(bono14Exento, 2),
-                TotalRentasExentas = decimal.Round(totalRentasExentas, 2),
-                RentaNeta = decimal.Round(rentaNeta, 2),
-                GastosPersonales = decimal.Round(gastosPersonales, 2),
-                CuotaIGSS = decimal.Round(cuotaIGSS, 2),
-                TotalDeducciones = decimal.Round(totalDeducciones, 2),
-                RentaImponible = decimal.Round(rentaImponible, 2),
-                ISRAnual = decimal.Round(isrAnual, 2),
-                RetencionMensual = decimal.Round(retencionMensual, 2),
-                TipoCalculo = input.EsProyectado ? "Proyectada" : "Definitiva",
-                DetalleCalculo = $"Renta Bruta: Q{totalRentaBruta:F2}; Rentas Exentas: Q{totalRentasExentas:F2}; " +
-                                $"Renta Neta: Q{rentaNeta:F2}; Deducciones: Q{totalDeducciones:F2}; " +
-                                $"Renta Imponible: Q{rentaImponible:F2}; ISR Anual: Q{isrAnual:F2}" +
-                                (input.EsProyectado ? $"; Retención Mensual: Q{retencionMensual:F2}" : "")
-            };
-
-            // Log
-            var log = new CalculatorLog
-            {
-                TipoCalculadora = "ISR Asalariado",
-                DatosEntrada = $"SalarioMensual={input.SalarioOrdinarioMensual}; Bono14={input.Bono14}; Aguinaldo={input.Aguinaldo}",
-                Resultado = $"ISRAnual={result.ISRAnual}; RetencionMensual={result.RetencionMensual}",
-                Fecha = DateTime.Now
-            };
-            _context.CalculatorLogs.Add(log);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { exito = true, datos = result, mensaje = "ISR asalariado calculado correctamente." });
-        }
-
+   
 
         // ===========================================================
         // 🆕 CALCULADORA #9 → ISR EMPRESA MENSUAL V2 - ✅ CORREGIDO
