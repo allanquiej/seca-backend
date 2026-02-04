@@ -645,25 +645,29 @@ public async Task<IActionResult> CalcularISRLaboral([FromBody] ISRInput input)
         }
 
         // ===========================================================
-// CALCULADORA ISO TRIMESTRAL - SEGÚN SAT
+// ===========================================================
+// CALCULADORA ISO TRIMESTRAL - ✅ ACTUALIZADO según Video YouTube
 // Ruta: POST /api/calculadoras/iso-trimestral
 // 
-// Fuente: Superintendencia de Administración Tributaria (SAT)
-// Ley del ISO: Decreto 73-2008
-// 
-// El contribuyente debe calcular el ISO de DOS formas y pagar el MAYOR:
-// 1. ISO sobre Ingresos Brutos: (Ingresos Anuales / 4) × 1%
-// 2. ISO sobre Activo Neto: ((Activo Neto / 4) × 1%) - IUSI Pagado
+// NUEVA LÓGICA según video:
+// 1. Verificar margen 4% → Si < 4% NO paga ISO
+// 2. Si Activo > 4×Ingresos → Calcular sobre Ingresos
+// 3. Si Activo <= 4×Ingresos → Calcular sobre Activo Neto (1/4)
 // ===========================================================
 [HttpPost("iso-trimestral")]
 public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralInput input)
 {
     // ========================================
-    // VALIDACIONES
+    // VALIDACIONES BÁSICAS
     // ========================================
     if (input.IngresosBrutosAnuales < 0)
     {
         return BadRequest(new { exito = false, mensaje = "Los ingresos brutos no pueden ser negativos." });
+    }
+    
+    if (input.CostoDeVentas < 0)
+    {
+        return BadRequest(new { exito = false, mensaje = "El costo de ventas no puede ser negativo." });
     }
     
     if (input.ActivoTotal < 0)
@@ -673,108 +677,201 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
 
 
     // ========================================
-    // OPCIÓN 1: ISO SOBRE INGRESOS BRUTOS
+    // PASO 1: VERIFICAR SI ESTÁ AFECTO AL ISO (MARGEN 4%)
     // ========================================
-    // Fórmula: (Ingresos Brutos Anuales / 4) × 1%
+    // Fórmula según video:
+    // Margen = (Ingresos Brutos - Costo de Ventas) / Ingresos Brutos
+    // Si Margen < 4% → NO está afecto al ISO
     
-    decimal baseTrimestralIngresos = input.IngresosBrutosAnuales / 4m;
-    decimal isoSobreIngresos = baseTrimestralIngresos * 0.01m;
+    // Si no hay ingresos, no está afecto
+    if (input.IngresosBrutosAnuales == 0)
+    {
+        return Ok(new 
+        { 
+            exito = true, 
+            datos = new ISOTrimestralResult
+            {
+                IngresosBrutos = 0,
+                CostoDeVentas = 0,
+                ResultadoBruto = 0,
+                MargenPorcentaje = 0,
+                EstaAfectoISO = false,
+                ISOAPagar = 0,
+                MetodoSeleccionado = "N/A",
+                RazonMetodo = "No hay ingresos brutos",
+                DetalleCalculo = "No hay ingresos brutos registrados.",
+                Mensaje = "La empresa NO está afecta al Impuesto de Solidaridad porque no registra ingresos.",
+                RecomendacionLegal = ""
+            },
+            mensaje = "No está afecto al ISO (sin ingresos)." 
+        });
+    }
     
-    string detalleIngresos = $"Ingresos Brutos Anuales: Q{input.IngresosBrutosAnuales:F2}; " +
-                            $"Base Trimestral (÷4): Q{baseTrimestralIngresos:F2}; " +
-                            $"ISO 1%: Q{isoSobreIngresos:F2}";
+    // Calcular margen
+    decimal resultadoBruto = input.IngresosBrutosAnuales - input.CostoDeVentas;
+    decimal margenDecimal = resultadoBruto / input.IngresosBrutosAnuales;
+    decimal margenPorcentaje = margenDecimal * 100m;
+    
+    // Verificar si está afecto (margen >= 4%)
+    bool estaAfectoISO = margenPorcentaje >= 4m;
+    
+    // Si NO está afecto, retornar inmediatamente
+    if (!estaAfectoISO)
+    {
+        return Ok(new 
+        { 
+            exito = true, 
+            datos = new ISOTrimestralResult
+            {
+                IngresosBrutos = decimal.Round(input.IngresosBrutosAnuales, 2),
+                CostoDeVentas = decimal.Round(input.CostoDeVentas, 2),
+                ResultadoBruto = decimal.Round(resultadoBruto, 2),
+                MargenPorcentaje = decimal.Round(margenPorcentaje, 2),
+                EstaAfectoISO = false,
+                ActivoNeto = 0,
+                ComparacionActivo = 0,
+                ISOAPagar = 0,
+                MetodoSeleccionado = "N/A",
+                RazonMetodo = "Margen menor al 4%",
+                DetalleCalculo = $"Ingresos: Q{input.IngresosBrutosAnuales:F2}; " +
+                                $"Costos: Q{input.CostoDeVentas:F2}; " +
+                                $"Resultado: Q{resultadoBruto:F2}; " +
+                                $"Margen: {margenPorcentaje:F2}%",
+                Mensaje = $"La empresa NO está afecta al ISO porque su margen de utilidad " +
+                         $"({margenPorcentaje:F2}%) es menor al 4% requerido.",
+                RecomendacionLegal = "Según el Decreto 73-2008, las empresas con margen de utilidad menor al 4% " +
+                                    "no están afectas al Impuesto de Solidaridad."
+            },
+            mensaje = "No está afecto al ISO (margen < 4%)." 
+        });
+    }
 
 
     // ========================================
-    // OPCIÓN 2: ISO SOBRE ACTIVO NETO
+    // PASO 2: CALCULAR ACTIVO NETO
     // ========================================
-    // Fórmula: 
-    // 1. Activo Neto = Activo Total - Dep. y Amort. Acum. - Reserva Ctas. Incob. - Créditos Reint.
-    // 2. Base Trimestral = Activo Neto / 4
-    // 3. ISO = Base Trimestral × 1%
-    // 4. ISO Final = ISO - IUSI Pagado
-    
     decimal activoNeto = input.ActivoTotal 
                        - input.DepreciacionAmortizacionAcumulada 
                        - input.ReservaCuentasIncobrables 
                        - input.CreditosReinversion;
     
-    // El activo neto no puede ser negativo
     if (activoNeto < 0) activoNeto = 0;
-    
-    decimal baseTrimestralActivo = activoNeto / 4m;
-    decimal isoSobreActivoNeto = baseTrimestralActivo * 0.01m;
-    
-    // Restar IUSI pagado (solo aplica para Activo Neto)
-    decimal isoSobreActivoNetoFinal = isoSobreActivoNeto - input.IUSIPagado;
-    if (isoSobreActivoNetoFinal < 0) isoSobreActivoNetoFinal = 0;
-    
-    string detalleActivo = $"Activo Total: Q{input.ActivoTotal:F2}; " +
-                          $"Dep./Amort. Acum.: Q{input.DepreciacionAmortizacionAcumulada:F2}; " +
-                          $"Reserva Ctas. Incob.: Q{input.ReservaCuentasIncobrables:F2}; " +
-                          $"Créditos Reint.: Q{input.CreditosReinversion:F2}; " +
-                          $"Activo Neto: Q{activoNeto:F2}; " +
-                          $"Base Trimestral (÷4): Q{baseTrimestralActivo:F2}; " +
-                          $"ISO 1%: Q{isoSobreActivoNeto:F2}; " +
-                          $"IUSI Pagado: Q{input.IUSIPagado:F2}; " +
-                          $"ISO Final: Q{isoSobreActivoNetoFinal:F2}";
 
 
     // ========================================
-    // DETERMINAR EL ISO A PAGAR
+    // PASO 3: DETERMINAR MÉTODO DE CÁLCULO
     // ========================================
-    // Según la SAT: Se paga el MAYOR entre las dos opciones
+    // Según video:
+    // Si Activo Neto > 4 × Ingresos Brutos → Calcular sobre INGRESOS
+    // Si Activo Neto <= 4 × Ingresos Brutos → Calcular sobre 1/4 ACTIVO NETO
     
+    decimal cuatroVecesIngresos = 4m * input.IngresosBrutosAnuales;
+    bool usarMetodoIngresos = activoNeto > cuatroVecesIngresos;
+    
+    decimal baseCalculo;
+    decimal isoCalculado;
     decimal isoAPagar;
-    string metodoUtilizado;
-    string mensaje;
+    string metodoSeleccionado;
+    string razonMetodo;
+    string detalleCalculo;
+
+
+    // ========================================
+    // PASO 4: CALCULAR ISO SEGÚN MÉTODO DETERMINADO
+    // ========================================
     
-    if (isoSobreIngresos > isoSobreActivoNetoFinal)
+    if (usarMetodoIngresos)
     {
-        isoAPagar = isoSobreIngresos;
-        metodoUtilizado = "ISO sobre Ingresos Brutos";
-        mensaje = "Se utiliza el método de Ingresos Brutos porque resulta en un monto mayor.";
+        // ========================================
+        // MÉTODO 1: CALCULAR SOBRE INGRESOS
+        // ========================================
+        // Fórmula: (Ingresos Brutos / 4) × 1%
+        
+        baseCalculo = input.IngresosBrutosAnuales;
+        decimal baseTrimestral = baseCalculo / 4m;
+        isoCalculado = baseTrimestral * 0.01m;
+        isoAPagar = isoCalculado;  // No se resta IUSI en este método
+        
+        metodoSeleccionado = "ISO sobre Ingresos Brutos";
+        razonMetodo = $"Activo Neto (Q{activoNeto:F2}) > 4×Ingresos (Q{cuatroVecesIngresos:F2})";
+        
+        detalleCalculo = $"Margen: {margenPorcentaje:F2}% (≥4% ✓); " +
+                        $"Activo Neto: Q{activoNeto:F2}; " +
+                        $"4×Ingresos: Q{cuatroVecesIngresos:F2}; " +
+                        $"Ingresos Anuales: Q{input.IngresosBrutosAnuales:F2}; " +
+                        $"Base Trimestral (÷4): Q{baseTrimestral:F2}; " +
+                        $"ISO 1%: Q{isoCalculado:F2}";
     }
     else
     {
-        isoAPagar = isoSobreActivoNetoFinal;
-        metodoUtilizado = "ISO sobre Activo Neto";
-        mensaje = "Se utiliza el método de Activo Neto porque resulta en un monto mayor.";
+        // ========================================
+        // MÉTODO 2: CALCULAR SOBRE 1/4 DEL ACTIVO NETO
+        // ========================================
+        // Fórmula: (Activo Neto / 4) × 1% - IUSI
+        
+        baseCalculo = activoNeto;
+        decimal baseTrimestral = baseCalculo / 4m;
+        isoCalculado = baseTrimestral * 0.01m;
+        
+        // Restar IUSI pagado (solo en este método)
+        isoAPagar = isoCalculado - input.IUSIPagado;
+        if (isoAPagar < 0) isoAPagar = 0;
+        
+        metodoSeleccionado = "ISO sobre 1/4 del Activo Neto";
+        razonMetodo = $"Activo Neto (Q{activoNeto:F2}) ≤ 4×Ingresos (Q{cuatroVecesIngresos:F2})";
+        
+        detalleCalculo = $"Margen: {margenPorcentaje:F2}% (≥4% ✓); " +
+                        $"Activo Neto: Q{activoNeto:F2}; " +
+                        $"4×Ingresos: Q{cuatroVecesIngresos:F2}; " +
+                        $"Base Trimestral (÷4): Q{baseTrimestral:F2}; " +
+                        $"ISO 1%: Q{isoCalculado:F2}; " +
+                        $"IUSI: Q{input.IUSIPagado:F2}; " +
+                        $"ISO a Pagar: Q{isoAPagar:F2}";
     }
 
 
     // ========================================
-    // CONSTRUIR RESULTADO
+    // PASO 5: CONSTRUIR RESULTADO
     // ========================================
     var result = new ISOTrimestralResult
     {
-        // Cálculo sobre Ingresos
-        IngresosBrutosAnuales = decimal.Round(input.IngresosBrutosAnuales, 2),
-        BaseTrimestralIngresos = decimal.Round(baseTrimestralIngresos, 2),
-        ISOSobreIngresos = decimal.Round(isoSobreIngresos, 2),
+        // Paso 1: Verificación margen 4%
+        IngresosBrutos = decimal.Round(input.IngresosBrutosAnuales, 2),
+        CostoDeVentas = decimal.Round(input.CostoDeVentas, 2),
+        ResultadoBruto = decimal.Round(resultadoBruto, 2),
+        MargenPorcentaje = decimal.Round(margenPorcentaje, 2),
+        EstaAfectoISO = estaAfectoISO,
         
-        // Cálculo sobre Activo
+        // Paso 2: Activo
         ActivoTotal = decimal.Round(input.ActivoTotal, 2),
         DepreciacionAmortizacionAcumulada = decimal.Round(input.DepreciacionAmortizacionAcumulada, 2),
         ReservaCuentasIncobrables = decimal.Round(input.ReservaCuentasIncobrables, 2),
         CreditosReinversion = decimal.Round(input.CreditosReinversion, 2),
         ActivoNeto = decimal.Round(activoNeto, 2),
-        BaseTrimestralActivo = decimal.Round(baseTrimestralActivo, 2),
-        ISOSobreActivoNeto = decimal.Round(isoSobreActivoNeto, 2),
-        IUSIPagado = decimal.Round(input.IUSIPagado, 2),
-        ISOSobreActivoNetoFinal = decimal.Round(isoSobreActivoNetoFinal, 2),
         
-        // Resultado final
+        // Paso 3: Decisión del método
+        ComparacionActivo = decimal.Round(cuatroVecesIngresos, 2),
+        MetodoSeleccionado = metodoSeleccionado,
+        RazonMetodo = razonMetodo,
+        
+        // Paso 4: Cálculo (solo el método usado)
+        BaseTrimestralIngresos = usarMetodoIngresos ? decimal.Round(input.IngresosBrutosAnuales / 4m, 2) : 0,
+        ISOSobreIngresos = usarMetodoIngresos ? decimal.Round(isoCalculado, 2) : 0,
+        
+        BaseTrimestralActivo = !usarMetodoIngresos ? decimal.Round(activoNeto / 4m, 2) : 0,
+        ISOSobreActivoNeto = !usarMetodoIngresos ? decimal.Round(isoCalculado, 2) : 0,
+        IUSIPagado = !usarMetodoIngresos ? decimal.Round(input.IUSIPagado, 2) : 0,
+        ISOSobreActivoNetoFinal = !usarMetodoIngresos ? decimal.Round(isoAPagar, 2) : 0,
+        
+        // Resultado
         ISOAPagar = decimal.Round(isoAPagar, 2),
-        MetodoUtilizado = metodoUtilizado,
         
         // Detalles
-        DetalleCalculoIngresos = detalleIngresos,
-        DetalleCalculoActivo = detalleActivo,
-        Mensaje = mensaje,
-        RecomendacionLegal = "Según el Decreto 73-2008 (Ley del ISO), el contribuyente debe calcular el impuesto " +
-                           "por ambos métodos y pagar el que resulte mayor. El ISO pagado puede acreditarse al ISR " +
-                           "del mismo período tributario."
+        DetalleCalculo = detalleCalculo,
+        Mensaje = $"Se utiliza el método de {metodoSeleccionado} porque {razonMetodo}.",
+        RecomendacionLegal = "La tasa del ISO es del 1% sobre los ingresos por servicios prestados. " +
+                           "Cuando los activos son más de 4 veces los ingresos brutos, el cálculo se hace sobre los ingresos. " +
+                           "De lo contrario, se realiza sobre la cuarta parte del monto de activo neto."
     };
 
 
@@ -784,9 +881,9 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
     var log = new CalculatorLog
     {
         TipoCalculadora = "ISO Trimestral",
-        DatosEntrada = $"Ingresos={input.IngresosBrutosAnuales}; ActivoTotal={input.ActivoTotal}; " +
-                      $"ActivoNeto={activoNeto}; IUSI={input.IUSIPagado}",
-        Resultado = $"ISOAPagar={result.ISOAPagar}; Método={metodoUtilizado}",
+        DatosEntrada = $"Ingresos={input.IngresosBrutosAnuales}; Costos={input.CostoDeVentas}; " +
+                      $"Margen={margenPorcentaje:F2}%; ActivoNeto={activoNeto}",
+        Resultado = $"Afecto={estaAfectoISO}; ISOAPagar={result.ISOAPagar}; Método={metodoSeleccionado}",
         Fecha = DateTime.Now
     };
     
@@ -801,7 +898,7 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
     { 
         exito = true, 
         datos = result, 
-        mensaje = "ISO trimestral calculado correctamente según normativa SAT." 
+        mensaje = "ISO trimestral calculado correctamente según normativa actualizada (margen 4% + regla activos)." 
     });
 }
 
