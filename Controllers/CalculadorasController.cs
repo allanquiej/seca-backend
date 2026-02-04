@@ -1213,20 +1213,36 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
             return Ok(new { exito = true, datos = result, mensaje = "ISR mensual calculado." });
         }
 
-        // ===========================================================
-        // 🆕 CALCULADORA #10 → ISR TRIMESTRAL V2 - ✅ CORREGIDO
+// ===========================================================
+        // 🆕 CALCULADORA #10 → ISR TRIMESTRAL V2 - ✅ ACTUALIZADO
         // Ruta: POST /api/calculadoras/isr-empresa-trimestral-v2
+        // ✅ CAMBIOS: Agregados RentasExentas, ISRPagadoAnteriorTrimestre
+        // ✅ Opción 2 ahora usa cálculo correcto: (Base × 25%) × 8%
         // ===========================================================
         [HttpPost("isr-empresa-trimestral-v2")]
         public async Task<IActionResult> CalcularISRTrimestralV2([FromBody] ISRTrimestralV2Input input)
         {
+            // Validaciones básicas
             if (input.ISOPendiente < 0)
             {
                 return BadRequest(new { exito = false, mensaje = "El ISO pendiente no puede ser negativo." });
             }
 
+            if (input.RentasExentas < 0)
+            {
+                return BadRequest(new { exito = false, mensaje = "Las rentas exentas no pueden ser negativas." });
+            }
+
+            if (input.ISRPagadoAnteriorTrimestre < 0)
+            {
+                return BadRequest(new { exito = false, mensaje = "El ISR pagado anterior no puede ser negativo." });
+            }
+
             ISRTrimestralV2Result result;
 
+            // ========================================
+            // OPCIÓN 1: CIERRES PARCIALES (ACUMULADO)
+            // ========================================
             if (input.UsarOpcionAcumulada)
             {
                 if (input.VentasAcumuladas < 0 || input.GastosAcumulados < 0)
@@ -1234,7 +1250,8 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                     return BadRequest(new { exito = false, mensaje = "Las ventas y gastos no pueden ser negativos." });
                 }
 
-                decimal baseCalculo = input.VentasAcumuladas - input.GastosAcumulados;
+                // Base = Ventas - Rentas Exentas - Gastos
+                decimal baseCalculo = input.VentasAcumuladas - input.RentasExentas - input.GastosAcumulados;
                 
                 if (baseCalculo <= 0)
                 {
@@ -1243,16 +1260,24 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                         OpcionUtilizada = "Opción 1 - Acumulado",
                         BaseCalculo = 0,
                         ISRCalculado = 0,
+                        ISR25Porciento = 0,
+                        ISR8Porciento = 0,
                         ISOAcreditar = 0,
+                        ISRPagadoAnterior = 0,
                         ISRAPagar = 0,
-                        DetalleCalculo = $"Ventas: Q{input.VentasAcumuladas:F2}; Gastos: Q{input.GastosAcumulados:F2}; No aplica ISR"
+                        DetalleCalculo = $"Ventas: Q{input.VentasAcumuladas:F2}; Rentas Exentas: -Q{input.RentasExentas:F2}; Gastos: -Q{input.GastosAcumulados:F2}; No aplica ISR"
                     };
                 }
                 else
                 {
+                    // ISR = Base × 25%
                     decimal isrCalculado = baseCalculo * 0.25m;
+                    
+                    // ISO a acreditar (no puede ser mayor al ISR calculado)
                     decimal isoAcreditar = Math.Min(input.ISOPendiente, isrCalculado);
-                    decimal isrAPagar = isrCalculado - isoAcreditar;
+                    
+                    // ISR a pagar = ISR - ISO - ISR Anterior
+                    decimal isrAPagar = isrCalculado - isoAcreditar - input.ISRPagadoAnteriorTrimestre;
                     if (isrAPagar < 0) isrAPagar = 0;
 
                     result = new ISRTrimestralV2Result
@@ -1260,12 +1285,18 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                         OpcionUtilizada = "Opción 1 - Acumulado",
                         BaseCalculo = decimal.Round(baseCalculo, 2),
                         ISRCalculado = decimal.Round(isrCalculado, 2),
+                        ISR25Porciento = 0, // No se muestra en Opción 1
+                        ISR8Porciento = 0,  // No aplica en Opción 1
                         ISOAcreditar = decimal.Round(isoAcreditar, 2),
+                        ISRPagadoAnterior = decimal.Round(input.ISRPagadoAnteriorTrimestre, 2),
                         ISRAPagar = decimal.Round(isrAPagar, 2),
-                        DetalleCalculo = $"Ventas: Q{input.VentasAcumuladas:F2}; Gastos: Q{input.GastosAcumulados:F2}; Base: Q{baseCalculo:F2}; ISR 25%: Q{isrCalculado:F2}; ISO: Q{isoAcreditar:F2}; A pagar: Q{isrAPagar:F2}"
+                        DetalleCalculo = $"Ventas: Q{input.VentasAcumuladas:F2}; Rentas Exentas: -Q{input.RentasExentas:F2}; Gastos: -Q{input.GastosAcumulados:F2}; Resultado: Q{baseCalculo:F2}; Resultado x25%: Q{isrCalculado:F2}; ISO: -Q{isoAcreditar:F2}; ISR anterior: -Q{input.ISRPagadoAnteriorTrimestre:F2}; ISR x pagar: Q{isrAPagar:F2}"
                     };
                 }
             }
+            // ========================================
+            // OPCIÓN 2: TRIMESTRE DIRECTO
+            // ========================================
             else
             {
                 if (input.VentasTrimestre < 0)
@@ -1280,37 +1311,72 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                         OpcionUtilizada = "Opción 2 - Trimestre",
                         BaseCalculo = 0,
                         ISRCalculado = 0,
+                        ISR25Porciento = 0,
+                        ISR8Porciento = 0,
                         ISOAcreditar = 0,
+                        ISRPagadoAnterior = 0,
                         ISRAPagar = 0,
                         DetalleCalculo = "Ventas: Q0.00; No aplica ISR"
                     };
                 }
                 else
                 {
-                    decimal baseCalculo = input.VentasTrimestre;
-                    decimal isrCalculado = baseCalculo * 0.25m;
-                    decimal isoAcreditar = Math.Min(input.ISOPendiente, isrCalculado);
-                    decimal isrAPagar = isrCalculado - isoAcreditar;
-                    if (isrAPagar < 0) isrAPagar = 0;
-
-                    result = new ISRTrimestralV2Result
+                    // Base = Ventas - Rentas Exentas
+                    decimal baseCalculo = input.VentasTrimestre - input.RentasExentas;
+                    
+                    if (baseCalculo <= 0)
                     {
-                        OpcionUtilizada = "Opción 2 - Trimestre",
-                        BaseCalculo = decimal.Round(baseCalculo, 2),
-                        ISRCalculado = decimal.Round(isrCalculado, 2),
-                        ISOAcreditar = decimal.Round(isoAcreditar, 2),
-                        ISRAPagar = decimal.Round(isrAPagar, 2),
-                        DetalleCalculo = $"Ventas: Q{input.VentasTrimestre:F2}; ISR 25%: Q{isrCalculado:F2}; ISO: Q{isoAcreditar:F2}; A pagar: Q{isrAPagar:F2}"
-                    };
+                        result = new ISRTrimestralV2Result
+                        {
+                            OpcionUtilizada = "Opción 2 - Trimestre",
+                            BaseCalculo = 0,
+                            ISRCalculado = 0,
+                            ISR25Porciento = 0,
+                            ISR8Porciento = 0,
+                            ISOAcreditar = 0,
+                            ISRPagadoAnterior = 0,
+                            ISRAPagar = 0,
+                            DetalleCalculo = $"Ventas: Q{input.VentasTrimestre:F2}; Rentas Exentas: -Q{input.RentasExentas:F2}; No aplica ISR"
+                        };
+                    }
+                    else
+                    {
+                        // Paso 1: ISR 25% = Base × 25%
+                        decimal isr25Porciento = baseCalculo * 0.25m;
+                        
+                        // Paso 2: ISR 8% = ISR 25% × 8% (equivale a Base × 2%)
+                        decimal isr8Porciento = isr25Porciento * 0.08m;
+                        
+                        // ISO a acreditar (no puede ser mayor al ISR calculado)
+                        decimal isoAcreditar = Math.Min(input.ISOPendiente, isr8Porciento);
+                        
+                        // ISR a pagar = ISR 8% - ISO
+                        decimal isrAPagar = isr8Porciento - isoAcreditar;
+                        if (isrAPagar < 0) isrAPagar = 0;
+
+                        result = new ISRTrimestralV2Result
+                        {
+                            OpcionUtilizada = "Opción 2 - Trimestre",
+                            BaseCalculo = decimal.Round(baseCalculo, 2),
+                            ISRCalculado = decimal.Round(isr8Porciento, 2), // El ISR final es el 8%
+                            ISR25Porciento = decimal.Round(isr25Porciento, 2),
+                            ISR8Porciento = decimal.Round(isr8Porciento, 2),
+                            ISOAcreditar = decimal.Round(isoAcreditar, 2),
+                            ISRPagadoAnterior = 0, // No aplica en Opción 2
+                            ISRAPagar = decimal.Round(isrAPagar, 2),
+                            DetalleCalculo = $"Ventas: Q{input.VentasTrimestre:F2}; Rentas Exentas: -Q{input.RentasExentas:F2}; Resultado: Q{baseCalculo:F2}; Resultado x25%: Q{isr25Porciento:F2}; Resultado x8%: Q{isr8Porciento:F2}; ISO: -Q{isoAcreditar:F2}; Total: Q{isrAPagar:F2}"
+                        };
+                    }
                 }
             }
 
+            // Log en base de datos
             var log = new CalculatorLog
             {
                 TipoCalculadora = "ISR Trimestral V2",
                 DatosEntrada = input.UsarOpcionAcumulada 
-                    ? $"Ventas={input.VentasAcumuladas}; Gastos={input.GastosAcumulados}; ISO={input.ISOPendiente}"
-                    : $"Ventas={input.VentasTrimestre}; ISO={input.ISOPendiente}",
+                    ? $"Ventas={input.VentasAcumuladas}; Rentas Exentas={input.RentasExentas}; Gastos={input.GastosAcumulados}; ISO={input.ISOPendiente}; ISR Anterior={input.ISRPagadoAnteriorTrimestre}"
+                    : $"Ventas={input.VentasTrimestre}; Rentas Exentas={input.RentasExentas}; ISO={input.ISOPendiente}",
                 Resultado = $"ISR={result.ISRCalculado}; APagar={result.ISRAPagar}",
                 Fecha = DateTime.Now
             };
