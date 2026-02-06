@@ -1482,10 +1482,15 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
 
             return Ok(new { exito = true, datos = result, mensaje = $"ISR trimestral calculado ({result.OpcionUtilizada})." });
         }
-        // ===========================================================
-        // 🆕 CALCULADORA #11 → IVA (Impuesto al Valor Agregado)
+// ===========================================================
+        // CALCULADORA IVA - ACTUALIZADO
         // Ruta: POST /api/calculadoras/iva
         // Calcula el IVA según el régimen: General, Pequeño Contribuyente, Exento
+        // 
+        // CAMBIOS:
+        // - Agregados 3 campos de deducciones separados
+        // - Cálculo actualizado: IVA Bruto - IVACredito - IVARetenido - IVAExento
+        // - Muestra si es "IVA POR PAGAR" o "IVA CRÉDITO"
         // ===========================================================
         [HttpPost("iva")]
         public async Task<IActionResult> CalcularIVA([FromBody] IVAInput input)
@@ -1499,46 +1504,79 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                     // RÉGIMEN GENERAL (12%)
                     // ====================================
                     
-                    if (input.VentasMes < 0 || input.ComprasMes < 0 || input.Retenciones < 0)
+                    if (input.VentasMes < 0 || input.ComprasMes < 0)
                     {
-                        return BadRequest(new { exito = false, mensaje = "Los montos no pueden ser negativos." });
+                        return BadRequest(new { exito = false, mensaje = "Los montos de ventas y compras no pueden ser negativos." });
+                    }
+                    
+                    if (input.IVACredito < 0 || input.IVARetenido < 0 || input.IVAExento < 0)
+                    {
+                        return BadRequest(new { exito = false, mensaje = "Las deducciones no pueden ser negativas." });
                     }
 
-                    // Calcular débito fiscal (IVA en ventas)
+                    // Calcular base y débito fiscal (IVA en ventas)
                     decimal baseVentas = input.VentasMes / 1.12m;
                     decimal debitoFiscal = baseVentas * 0.12m;
 
-                    // Calcular crédito fiscal (IVA en compras)
+                    // Calcular base y crédito fiscal (IVA en compras)
                     decimal baseCompras = input.ComprasMes / 1.12m;
                     decimal creditoFiscal = baseCompras * 0.12m;
 
                     // IVA bruto = Débito - Crédito
                     decimal ivaBruto = debitoFiscal - creditoFiscal;
 
-                    // IVA a pagar = IVA Bruto - Retenciones
-                    decimal ivaAPagar = ivaBruto - input.Retenciones;
+                    // Total de deducciones (3 campos separados)
+                    decimal totalDeducciones = input.IVACredito + input.IVARetenido + input.IVAExento;
+
+                    // IVA a pagar = IVA Bruto - Total Deducciones
+                    decimal ivaAPagar = ivaBruto - totalDeducciones;
                     
-                    // Si es negativo, hay saldo a favor
-                    if (ivaAPagar < 0) ivaAPagar = 0;
+                    // Determinar si es pago o crédito
+                    bool esCredito = ivaAPagar < 0;
+                    string tipoResultado = esCredito ? "IVA CRÉDITO" : "IVA POR PAGAR";
+                    
+                    // Valor absoluto si es crédito para mostrarlo positivo
+                    decimal ivaFinal = esCredito ? Math.Abs(ivaAPagar) : ivaAPagar;
 
                     result = new IVAResult
                     {
                         RegimenNombre = "Régimen General (IVA 12%)",
+                        
+                        // Bases
+                        BaseVentas = decimal.Round(baseVentas, 2),
+                        BaseCompras = decimal.Round(baseCompras, 2),
+                        
+                        // IVA
                         DebitoFiscal = decimal.Round(debitoFiscal, 2),
                         CreditoFiscal = decimal.Round(creditoFiscal, 2),
                         IVABruto = decimal.Round(ivaBruto, 2),
-                        IVAAPagar = decimal.Round(ivaAPagar, 2),
+                        
+                        // Deducciones separadas
+                        IVACredito = decimal.Round(input.IVACredito, 2),
+                        IVARetenido = decimal.Round(input.IVARetenido, 2),
+                        IVAExento = decimal.Round(input.IVAExento, 2),
+                        TotalDeducciones = decimal.Round(totalDeducciones, 2),
+                        
+                        // Resultado
+                        IVAAPagar = decimal.Round(ivaFinal, 2),
+                        
                         CuotaFija = 0,
                         Aplica = true,
-                        Mensaje = ivaBruto < 0 
-                            ? "Tienes saldo a favor. Puedes solicitarlo en devolución o acreditarlo al siguiente mes."
-                            : "IVA calculado correctamente.",
+                        
+                        Mensaje = esCredito 
+                            ? $"{tipoResultado}: Tienes un saldo a favor de Q{ivaFinal:F2}. Puedes solicitarlo en devolución o acreditarlo al siguiente mes."
+                            : $"{tipoResultado}: Debes pagar Q{ivaFinal:F2} este mes.",
+                            
                         DetalleCalculo = $"Ventas: Q{input.VentasMes:F2}; Base ventas: Q{baseVentas:F2}; " +
                                        $"Débito fiscal (12%): Q{debitoFiscal:F2}; " +
                                        $"Compras: Q{input.ComprasMes:F2}; Base compras: Q{baseCompras:F2}; " +
                                        $"Crédito fiscal (12%): Q{creditoFiscal:F2}; " +
-                                       $"IVA bruto: Q{ivaBruto:F2}; Retenciones: Q{input.Retenciones:F2}; " +
-                                       $"IVA a pagar: Q{ivaAPagar:F2}"
+                                       $"IVA bruto (Débito - Crédito): Q{ivaBruto:F2}; " +
+                                       $"(-) IVA crédito: Q{input.IVACredito:F2}; " +
+                                       $"(-) IVA retenido: Q{input.IVARetenido:F2}; " +
+                                       $"(-) IVA exento: Q{input.IVAExento:F2}; " +
+                                       $"Total deducciones: Q{totalDeducciones:F2}; " +
+                                       $"{tipoResultado}: Q{ivaFinal:F2}"
                     };
                     break;
 
@@ -1560,9 +1598,15 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                         result = new IVAResult
                         {
                             RegimenNombre = "Pequeño Contribuyente",
+                            BaseVentas = 0,
+                            BaseCompras = 0,
                             DebitoFiscal = 0,
                             CreditoFiscal = 0,
                             IVABruto = 0,
+                            IVACredito = 0,
+                            IVARetenido = 0,
+                            IVAExento = 0,
+                            TotalDeducciones = 0,
                             IVAAPagar = 0,
                             CuotaFija = 0,
                             Aplica = false,
@@ -1577,9 +1621,15 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                         result = new IVAResult
                         {
                             RegimenNombre = "Pequeño Contribuyente",
+                            BaseVentas = 0,
+                            BaseCompras = 0,
                             DebitoFiscal = 0,
                             CreditoFiscal = 0,
                             IVABruto = 0,
+                            IVACredito = 0,
+                            IVARetenido = 0,
+                            IVAExento = 0,
+                            TotalDeducciones = 0,
                             IVAAPagar = cuotaFija,
                             CuotaFija = cuotaFija,
                             Aplica = true,
@@ -1599,9 +1649,15 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
                     result = new IVAResult
                     {
                         RegimenNombre = "Exento de IVA",
+                        BaseVentas = 0,
+                        BaseCompras = 0,
                         DebitoFiscal = 0,
                         CreditoFiscal = 0,
                         IVABruto = 0,
+                        IVACredito = 0,
+                        IVARetenido = 0,
+                        IVAExento = 0,
+                        TotalDeducciones = 0,
                         IVAAPagar = 0,
                         CuotaFija = 0,
                         Aplica = true,
@@ -1619,8 +1675,9 @@ public async Task<IActionResult> CalcularISOTrimestral([FromBody] ISOTrimestralI
             {
                 TipoCalculadora = "IVA",
                 DatosEntrada = $"Regimen={input.Regimen}; Ventas={input.VentasMes}; Compras={input.ComprasMes}; " +
-                              $"Retenciones={input.Retenciones}; IngresosAnuales={input.IngresosAnuales}",
-                Resultado = $"IVAAPagar={result.IVAAPagar}; Aplica={result.Aplica}",
+                              $"IVACredito={input.IVACredito}; IVARetenido={input.IVARetenido}; IVAExento={input.IVAExento}; " +
+                              $"IngresosAnuales={input.IngresosAnuales}",
+                Resultado = $"IVAAPagar={result.IVAAPagar}; TipoResultado={((result.IVABruto - result.TotalDeducciones) < 0 ? "CREDITO" : "PAGAR")}; Aplica={result.Aplica}",
                 Fecha = DateTime.Now
             };
             _context.CalculatorLogs.Add(log);
