@@ -21,16 +21,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        // ⭐ Convierte PascalCase (C#) a camelCase (JavaScript)
-        // Ejemplo: "DebitoFiscal" → "debitoFiscal"
-        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-        
-        // ⭐ Serializa enums como strings en lugar de números
-        // Ejemplo: RegimenIVA.General → "general" en lugar de 1
-        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
-        
-        // ⭐ Ignora propiedades con valor null (reduce tamaño del JSON)
-        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        options.JsonSerializerOptions.PropertyNamingPolicy = null; // Mantener PascalCase
     });
 // ⭐⭐⭐ FIN DEL CAMBIO ⭐⭐⭐
 
