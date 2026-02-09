@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using SecaBackend.Data;
 using SecaBackend.Models;
 using System.Text.Json.Serialization; // ⭐ NUEVO: Necesario para JsonStringEnumConverter
+using System.Text.Json; // ⭐ NUEVO: Necesario para JsonNamingPolicy.CamelCase
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,7 +22,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        options.JsonSerializerOptions.PropertyNamingPolicy = null; // Mantener PascalCase
+        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase; // ✅ Convertir a camelCase automáticamente
     });
 // ⭐⭐⭐ FIN DEL CAMBIO ⭐⭐⭐
 
